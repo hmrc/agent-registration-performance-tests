@@ -21,6 +21,8 @@ import io.gatling.http.Predef._
 import io.gatling.http.request.builder.HttpRequestBuilder
 import uk.gov.hmrc.performance.conf.ServicesConfiguration
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 object AgentRegistrationRequests extends ServicesConfiguration {
@@ -28,6 +30,14 @@ object AgentRegistrationRequests extends ServicesConfiguration {
   val baseUrl: String    = baseUrlFor("agent-registration")
   val stubsUrl: String   = baseUrlFor("agents-external-stubs")
   val route: String      = "/agent-registration/apply"
+
+  private val emailVerificationBaseUrl = "http://localhost:9890"
+
+  private def normalizeLocation(location: String): String = {
+    if (location.startsWith("http")) location
+    else if (location.startsWith("/email-verification/")) s"$emailVerificationBaseUrl$location"
+    else s"$baseUrl$location"
+  }
 
   val getAgentTypePage: HttpRequestBuilder =
     http("Get Agent Type Page")
@@ -223,6 +233,144 @@ object AgentRegistrationRequests extends ServicesConfiguration {
       .formParam("lastName", "User")
       .formParam("dateOfBirth", "2006-04-24")
       .formParam("nino", "OA189787A")
+      .check(status.is(303))
+      .check(header("Location").saveAs("taskListUrl"))
+
+  val getTaskListPage: HttpRequestBuilder =
+    http("Get Task List Page")
+      .get("#{taskListUrl}")
+      .check(status.is(200))
+
+  val getApplicantNamePage: HttpRequestBuilder =
+    http("Get Applicant Name Page")
+      .get(s"$baseUrl$route/applicant/applicant-name")
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
+
+  val postApplicantName: HttpRequestBuilder =
+    http("Post Applicant Name")
+      .post(s"$baseUrl$route/applicant/applicant-name")
+      .formParam("authorisedName", "Test User")
+      .formParam("csrfToken", "#{csrfToken}")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(header("Location").saveAs("nextPageUrl"))
+
+  val getTelephoneNumberPage: HttpRequestBuilder =
+    http("Get Telephone Number Page")
+      .get(s"$baseUrl$route/applicant/telephone-number")
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
+
+  val postTelephoneNumber: HttpRequestBuilder =
+    http("Post Telephone Number")
+      .post(s"$baseUrl$route/applicant/telephone-number")
+      .formParam("telephoneNumber", "07777777777")
+      .formParam("csrfToken", "#{csrfToken}")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+
+  val getEmailAddressPage: HttpRequestBuilder =
+    http("Get Email Address Page")
+      .get(s"$baseUrl$route/applicant/email-address")
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
+
+  val postEmailAddress: HttpRequestBuilder =
+    http("Post Email Address")
+      .post(s"$baseUrl$route/applicant/email-address")
+      .formParam("emailAddress", "test@test.com")
+      .formParam("csrfToken", "#{csrfToken}")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .saveAs("verifyEmailPageUrl")
+      )
+
+  val getVerifyEmailPage: HttpRequestBuilder =
+    http("Get Verify Email Page")
+      .get("#{verifyEmailPageUrl}")
+      .check(status.in(200, 303))
+      .check(
+        header("Location")
+          .optional
+          .saveAs("emailVerificationLinkFromRedirect")
+      )
+      .check(
+        regex("""(https?://[^\"']+/email-verification/journey/[^\"']+/passcode\?[^\"'\s<]+)""")
+          .optional
+          .saveAs("emailVerificationLinkFromBody")
+      )
+
+  val getEmailVerificationPasscodesPage: HttpRequestBuilder =
+    http("Get Email Verification Passcodes Page")
+      .get(session => {
+        val emailVerificationLink = session("emailVerificationLinkFromRedirect").asOption[String]
+          .map(normalizeLocation)
+          .orElse(session("emailVerificationLinkFromBody").asOption[String].map(_.replace("&amp;", "&")))
+          .getOrElse(session("verifyEmailPageUrl").as[String])
+        val encodedLink           = URLEncoder.encode(emailVerificationLink, StandardCharsets.UTF_8.name())
+        s"$baseUrl/agent-registration/test-only/email-verification-pass-codes?emailVerificationLink=$encodedLink"
+      })
+      .check(status.is(200))
+      .check(
+        bodyString.transform { body =>
+          val passcodePatterns = Seq(
+            """(?i)pass\s*code[^0-9]*([0-9]{6})""".r,
+            """\b([0-9]{6})\b""".r
+          )
+          passcodePatterns
+            .view
+            .flatMap(_.findFirstMatchIn(body).map(_.group(1)))
+            .headOption
+            .getOrElse("")
+        }.saveAs("emailVerificationCode")
+      )
+
+  val getEmailVerificationEntryPage: HttpRequestBuilder =
+    http("Get Email Verification Entry Page")
+      .get(session => {
+        val redirect = session.attributes.get("emailVerificationLinkFromRedirect").collect { case s: String => s }
+        val bodyLink = session.attributes.get("emailVerificationLinkFromBody").collect { case s: String => s }
+          .map(_.replace("&amp;", "&"))
+        val fallback = session.attributes.get("verifyEmailPageUrl").collect { case s: String => s }.getOrElse("")
+        val target   = redirect
+          .map(normalizeLocation)
+          .orElse(bodyLink)
+          .getOrElse(fallback)
+        io.gatling.commons.validation.Success(target)
+      })
+      .check(status.is(200))
+      .check(substring("Confirmation code"))
+      .check(
+        regex("""<input[^>]*name=\"csrfToken\"[^>]*value=\"([^\"]+)\"""")
+          .saveAs("csrfToken")
+      )
+      .check(
+        regex("""<form[^>]*action=\"([^\"]*?/email-verification/journey/[^\"]*?/passcode[^\"]*)\"""")
+          .transform(_.replace("&amp;", "&"))
+          .saveAs("emailVerificationFormAction")
+      )
+
+  val postEmailVerificationCode: HttpRequestBuilder =
+    http("Post Email Verification Code")
+      .post(session => {
+        val fallback = session.attributes.get("verifyEmailPageUrl").collect { case s: String => s }.getOrElse("")
+        val action   = session.attributes.get("emailVerificationFormAction").collect { case s: String => s }
+        val redirect = session.attributes.get("emailVerificationLinkFromRedirect").collect { case s: String => s }
+        val bodyLink = session.attributes.get("emailVerificationLinkFromBody").collect { case s: String => s }
+          .map(_.replace("&amp;", "&"))
+        val target   = action
+          .map(normalizeLocation)
+          .orElse(redirect.map(normalizeLocation))
+          .orElse(bodyLink)
+          .getOrElse(fallback)
+        io.gatling.commons.validation.Success(target)
+      })
+      .formParam("passcode", "#{emailVerificationCode}")
+      .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
 
 }

@@ -38,7 +38,19 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
 
   setup("sign-in", "Sign In") withRequests (
     getSignInPage,
-    postSignIn
+    postSignIn,
+    getSignInInfoPage,
+    getContinueToSignIn,
+    getStubsSignInPage,
+    postStubsSignIn,
+    getStubsUserCreatePage,
+    postStubsUserCreatePage,
+    getStubsUserEditPage,
+    postStubsUserEditPage,
+    getInitiateAgentApplicationPage,
+    getGrsTestDataPage,
+    getGrsFormIfNeeded,
+    postGrsTestDataPage
   )
 
   setup("continue-to-sign-in", "Continue To Sign In") withRequests (
@@ -65,7 +77,21 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getInitiateAgentApplicationPage,
     getGrsTestDataPage,
     getGrsFormIfNeeded,
-    postGrsTestDataPage
+    postGrsTestDataPage,
+    getTaskListPage
+  )
+
+  setup("applicant-contact-details", "Applicant Contact Details") withRequests (
+    getApplicantNamePage,
+    postApplicantName,
+    getTelephoneNumberPage,
+    postTelephoneNumber,
+    getEmailAddressPage,
+    postEmailAddress,
+    getVerifyEmailPage,
+    getEmailVerificationPasscodesPage,
+    getEmailVerificationEntryPage,
+    postEmailVerificationCode
   )
 
   runSimulation()
