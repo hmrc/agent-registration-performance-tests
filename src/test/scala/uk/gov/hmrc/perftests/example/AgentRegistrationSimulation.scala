@@ -50,7 +50,8 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getInitiateAgentApplicationPage,
     getGrsTestDataPage,
     getGrsFormIfNeeded,
-    postGrsTestDataPage
+    postGrsTestDataPage,
+    getTaskListPage
   )
 
   setup("continue-to-sign-in", "Continue To Sign In") withRequests (
@@ -81,18 +82,76 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getTaskListPage
   )
 
-  setup("applicant-contact-details", "Applicant Contact Details") withRequests (
-    getApplicantNamePage,
-    postApplicantName,
-    getTelephoneNumberPage,
-    postTelephoneNumber,
-    getEmailAddressPage,
-    postEmailAddress,
-    getVerifyEmailPage,
-    getEmailVerificationPasscodesPage,
-    getEmailVerificationEntryPage,
-    postEmailVerificationCode
+   setup("applicant-contact-details", "Applicant Contact Details") withRequests (
+     getTaskListPage,
+     enterApplicantDetailsFromTaskList,
+     followApplicantDetailsInitialRedirect,
+     followApplicantDetailsRedirectIfNeeded,
+     getApplicantNamePage,
+     postApplicantName,
+     getTelephoneNumberPage,
+     postTelephoneNumber,
+     getEmailAddressPage,
+     postEmailAddress,
+     getApplicantCheckYourAnswersPage,
+     goToTaskListFromApplicantCya,
+     followTaskListRedirect1,
+     followTaskListRedirect2AndExtractAgentDetails,
+     followTaskListRedirect3AndExtractAgentDetails
+   )
+
+  setup("agent-account-details", "Agent Account Details") withRequests (
+    getAgentDetailsCheckYourAnswersPage,
+    followAgentDetailsInitialRedirect,
+    getBusinessNamePage,
+    postBusinessName,
+    getAgentTelephoneNumberPage,
+    postAgentTelephoneNumber,
+    getAgentEmailPage,
+    postAgentEmail,
+    getAgentCorrespondenceAddressPage,
+    postAgentCorrespondenceAddress,
+    getAgentCheckYourAnswersPage,
+    goToTaskListFromAgentCya,
+    followTaskListRedirectAfterAgentCya1,
+    followTaskListRedirectAfterAgentCya2,
+    followTaskListRedirectAfterAgentCya3
   )
+
+  setup("amls-details", "AMLS Details") withRequests (
+    getAmlSupervisorNamePage,
+    postAmlSupervisorName,
+    getAmlRegistrationNumberPage,
+    postAmlRegistrationNumber,
+    getAmlCheckYourAnswersPage,
+    goToTaskListFromAmlCya,
+    followTaskListRedirectAfterAmlCya1,
+    followTaskListRedirectAfterAmlCya2,
+    followTaskListRedirectAfterAmlCya3
+  )
+
+  setup("agent-standards", "Agent Standards") withRequests (
+    getAgentStandardAcceptPage,
+    postAgentStandardAccept,
+    followTaskListRedirectAfterAgentStandard1,
+    followTaskListRedirectAfterAgentStandard2,
+    followTaskListRedirectAfterAgentStandard3
+  )
+
+  setup("list-details", "List Details") withRequests (
+    getListDetailsSoleTraderPage,
+    postListDetailsSoleTraderContinue,
+    followListDetailsSignOutRedirectToSignIn
+  )
+
+  setup("prove-identity", "Prove Identity") withRequests (
+    getSignInPageAfterListDetails,
+    getGgSignInPageAfterListDetails,
+    postSignInWithIndividualUser,
+    getStubsUserEditPageAfterListDetails,
+    postStubsUserEditPageAfterListDetails
+  )
+
 
   runSimulation()
 }

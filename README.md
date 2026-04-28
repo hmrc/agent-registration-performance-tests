@@ -10,10 +10,18 @@ Performance test suite for the `<digital service name>`, using [performance-test
 
 Start Mongo Docker container following instructions from the [MDTP Handbook](https://docs.tax.service.gov.uk/mdtp-handbook/documentation/developer-set-up/set-up-mongodb.html).
 
-Start `PLATFORM_TEST_EXAMPLE_UI_TESTS` services as follows:
+Start `AGENT_REGISTRATION_STUBBED_GRS` services as follows:
 
 ```bash
-sm2 --start PLATFORM_TEST_EXAMPLE_UI_TESTS
+sm2 --start AGENT_REGISTRATION_STUBBED_GRS
+```
+Stop AGENT_REGISTRATION_FRONTEND in sm2:
+```bash
+sm2 --stop AGENT_REGISTRATION_FRONTEND
+```
+Restart AGENT_REGISTRATION_FRONTEND in sbt with email verification turned off (to avoid email verification calls to the stubbed GRS service which are not supported):
+```bash
+sbt -DignoreEmailVerification=true run
 ```
 
 ### Logging
