@@ -37,7 +37,7 @@ Do **NOT** run a full performance test against staging from your local machine. 
 Run smoke test (locally) as follows:
 
 ```bash
-sbt -Dperftest.runSmokeTest=true -DrunLocal=true gatling:test
+sbt -DdebugRequests=true -Dperftest.runSmokeTest=true -DrunLocal=true "gatling:testOnly uk.gov.hmrc.perftests.mmtar.AgentRegistrationSimulation"
 ```
 
 Run full performance test (locally) as follows:
