@@ -14,30 +14,34 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.perftests.example
+package uk.gov.hmrc.perftests.mmtar
 
 import io.gatling.core.Predef._
+import io.gatling.core.session.Session
 import io.gatling.http.Predef._
 import io.gatling.http.request.builder.HttpRequestBuilder
 import uk.gov.hmrc.performance.conf.ServicesConfiguration
 
-import java.net.URLEncoder
-import java.net.URLDecoder
-import java.net.URI
+import java.net.{URLDecoder, URLEncoder}
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import scala.util.Try
 
-object AgentRegistrationRequests extends ServicesConfiguration {
+object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistrationHelpers {
 
-  val baseUrl: String    = baseUrlFor("agent-registration")
-  val stubsUrl: String   = baseUrlFor("agents-external-stubs")
-  val route: String      = "/agent-registration/apply"
+  val baseUrl: String  = baseUrlFor("agent-registration")
+  val stubsUrl: String = baseUrlFor("agents-external-stubs")
+  val route: String    = "/agent-registration/apply"
 
-  private val emailVerificationBaseUrl = Try(baseUrlFor("email-verification")).getOrElse("http://localhost:9890")
+  private val emailVerificationBaseUrl =
+    Try(baseUrlFor("email-verification")).getOrElse("http://localhost:9890")
 
   private def maybeNormalizeLocation(location: String): String =
-    Option(location).map(_.replace("&amp;", "&").trim).filter(_.nonEmpty).map(normalizeLocation).orNull
+    Option(location)
+      .map(_.replace("&amp;", "&").trim)
+      .filter(_.nonEmpty)
+      .map(normalizeLocation)
+      .orNull
 
   private def maybeExtractEmailVerificationLink(location: String): String =
     Option(location).map(_.replace("&amp;", "&").trim).filter(_.nonEmpty).flatMap { value =>
@@ -46,12 +50,15 @@ object AgentRegistrationRequests extends ServicesConfiguration {
       if (value.contains("/agent-registration/test-only/email-verification-pass-codes") && value.contains(key)) {
         val encoded = value.substring(value.indexOf(key) + key.length)
         Try(URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())).toOption
-      } else Some(value)
+      } else {
+        Some(value)
+      }
     }.map(maybeNormalizeLocation).orNull
 
-  private def passcodesPageUrlFromSession(session: Session) =
+  private def passcodesPageUrlFromSession(session: Session): Option[String] =
     session.attributes.get("verifyEmailPageUrl").collect {
-      case s: String if s.contains("/agent-registration/test-only/email-verification-pass-codes") => maybeNormalizeLocation(s)
+      case s: String if s.contains("/agent-registration/test-only/email-verification-pass-codes") =>
+        maybeNormalizeLocation(s)
     }
 
   private def emailVerificationUrlFromSession(session: Session) = {
@@ -70,75 +77,25 @@ object AgentRegistrationRequests extends ServicesConfiguration {
       .getOrElse(io.gatling.commons.validation.Failure("Email verification passcode URL not found in session"))
   }
 
-  private def normalizeLocation(location: String): String = {
-    if (location.startsWith("http")) location
-    else if (location.startsWith("/email-verification/")) s"$emailVerificationBaseUrl$location"
-    else s"$baseUrl$location"
-  }
-
-  private def normalizeSignInLocation(location: String): String = {
-    val cleaned = Option(location).map(_.replace("&amp;", "&").trim).getOrElse("")
-
-    if (cleaned.startsWith("http")) cleaned
-    else if (cleaned.startsWith("/bas-gateway/") || cleaned.startsWith("/gg/") || cleaned.startsWith("/agents-external-stubs/")) s"$stubsUrl$cleaned"
-    else if (cleaned.startsWith("/")) s"$baseUrl$cleaned"
-    else cleaned
-  }
-
-  private def decodeQueryValue(value: String): String =
-    Try(URLDecoder.decode(value, StandardCharsets.UTF_8.name())).getOrElse(value)
-
-  private def extractQueryParams(url: String): Map[String, String] =
-    Try(new URI(url)).toOption
-      .flatMap(uri => Option(uri.getRawQuery))
-      .map(
-        _.split("&").toSeq.flatMap {
-          case pair if pair.contains("=") =>
-            pair.split("=", 2) match {
-              case Array(key, value) => Some(decodeQueryValue(key) -> decodeQueryValue(value))
-              case _                 => None
-            }
-          case key if key.nonEmpty => Some(decodeQueryValue(key) -> "")
-          case _                   => None
-        }.toMap
-      )
-      .getOrElse(Map.empty)
-
-  private def ggSignInUrlFromBasUrl(url: String): Option[String] = {
-    val normalized = normalizeSignInLocation(url)
-    val params     = extractQueryParams(normalized)
-
-    params.get("continue_url").orElse(params.get("continue")).map { continue =>
-      val originParam = params.get("origin").filter(_.nonEmpty).map(origin => s"&origin=$origin").getOrElse("")
-      s"${originOf(normalized).getOrElse(stubsUrl)}/gg/sign-in?continue=$continue$originParam"
-    }
-  }
-
-  private def originOf(url: String): Option[String] =
-    Try(new URI(url)).toOption.flatMap { uri =>
-      Option(uri.getScheme).flatMap { scheme =>
-        Option(uri.getHost).map { host =>
-          val portPart = if (uri.getPort > 0) s":${uri.getPort}" else ""
-          s"$scheme://$host$portPart"
-        }
-      }
-    }
-
   private def normalizeEmailVerificationAction(action: String, session: Session): String = {
     val cleaned = Option(action).map(_.replace("&amp;", "&").trim).getOrElse("")
 
-    if (cleaned.startsWith("http")) cleaned
-    else if (cleaned.startsWith("/email-verification/")) {
+    if (cleaned.startsWith("http")) {
+      cleaned
+    } else if (cleaned.startsWith("/email-verification/")) {
       val emailVerificationOrigin = emailVerificationUrlFromSession(session) match {
         case io.gatling.commons.validation.Success(url: String) => originOf(url)
-        case _                                          => None
+        case _                                                  => None
       }
+
       s"${emailVerificationOrigin.getOrElse(emailVerificationBaseUrl)}$cleaned"
-    } else if (cleaned.startsWith("/")) s"$baseUrl$cleaned"
-    else cleaned
+    } else if (cleaned.startsWith("/")) {
+      s"$baseUrl$cleaned"
+    } else {
+      cleaned
+    }
   }
 
-  // Classify the returned page so we can see where the journey actually landed.
   private def detectAgentDetailsLandingPage(body: String): String = {
     val normalized = Option(body).getOrElse("").toLowerCase
 
@@ -183,6 +140,10 @@ object AgentRegistrationRequests extends ServicesConfiguration {
     listDetailsContinueLinkRegex.findFirstMatchIn(Option(body).getOrElse(""))
       .map(_.group(1).replace("&amp;", "&").trim)
       .getOrElse("")
+
+  // --------------------------------------------------
+  // Initial application setup
+  // --------------------------------------------------
 
   val getAgentTypePage: HttpRequestBuilder =
     http("Get Agent Type Page")
@@ -1207,68 +1168,504 @@ object AgentRegistrationRequests extends ServicesConfiguration {
           bodyString.transform(_ => s"perf-${UUID.randomUUID().toString.take(8)}").saveAs("individualUserId")
         )
 
-   val postSignInWithIndividualUser: HttpRequestBuilder =
-     http("Post Sign In With Individual User")
-       .post(session => {
-         session("listDetailsGgSignInAction").asOption[String]
-           .filter(_.nonEmpty)
-           .map(io.gatling.commons.validation.Success(_))
-           .getOrElse {
-             session("listDetailsBasSignInUrl").asOption[String]
-               .orElse(session("signInPageUrl").asOption[String])
-               .map(normalizeSignInLocation)
-               .flatMap(ggSignInUrlFromBasUrl)
-               .map(io.gatling.commons.validation.Success(_))
-               .getOrElse(io.gatling.commons.validation.Failure("Unable to derive GG sign-in URL from BAS sign-in redirect"))
-           }
-       })
-       .formParam("userId", "#{individualUserId}")
-       .formParam("planetId", "#{planetId}")
-       .formParam("csrfToken", "#{csrfToken}")
-       .check(status.is(303))
-       .check(headerRegex("Location", ".*/agents-external-stubs/user/(create|edit)\\?.*continue=.*").saveAs("userEditPageUrl"))
-
-   val getStubsUserEditPageAfterListDetails: HttpRequestBuilder =
-     http("Get Stubs User Edit Page After List Details")
-       .get(session => {
-         val url = session("userEditPageUrl").as[String]
-         val fullUrl = normalizeSignInLocation(url)
-         io.gatling.commons.validation.Success(fullUrl)
-       })
-       .check(status.is(200))
-       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
-       .check(css("input[name=name]", "value").optional.saveAs("currentUserName"))
-        .check(
-          regex("""<form[^>]*action=\"([^\"]+)\"[^>]*id=\"userForm\"""")
-            .transform(_.replace("&amp;", "&"))
-            .saveAs("stubsUserUpdateActionAfterListDetails")
-        )
-       .check(regex("""id=\"(?:update1|update2)\"""").exists)
-
-    val postStubsUserEditPageAfterListDetails: HttpRequestBuilder =
-      http("Post Stubs User Edit Page After List Details")
+     val postSignInWithIndividualUser: HttpRequestBuilder =
+      http("Post Sign In With Individual User")
         .post(session => {
-          val url = session("stubsUserUpdateActionAfterListDetails").as[String]
-          val fullUrl = normalizeSignInLocation(url)
-          io.gatling.commons.validation.Success(fullUrl)
+          session("listDetailsGgSignInAction").asOption[String]
+            .filter(_.nonEmpty)
+            .map(io.gatling.commons.validation.Success(_))
+            .getOrElse {
+              session("listDetailsBasSignInUrl").asOption[String]
+                .orElse(session("signInPageUrl").asOption[String])
+                .map(normalizeSignInLocation)
+                .flatMap(ggSignInUrlFromBasUrl)
+                .map(io.gatling.commons.validation.Success(_))
+                .getOrElse(io.gatling.commons.validation.Failure("Unable to derive GG sign-in URL from BAS sign-in redirect"))
+            }
         })
+        .formParam("userId", "#{individualUserId}")
+        .formParam("planetId", "#{planetId}")
         .formParam("csrfToken", "#{csrfToken}")
-        .formParamSeq(session => {
-          val isEditFlow = session("userEditPageUrl").as[String].contains("/user/edit")
-          if (isEditFlow) {
-            Seq("name" -> "Test User")
-          } else {
-            Seq(
-              "affinityGroup" -> "Individual",
-              "principalEnrolmentService" -> "HMRC-PT"
-            )
-          }
-        })
         .check(status.is(303))
-        .check(headerRegex("Location", ".*/(?:agent-registration/provide-details/match-application/.*|agents-external-stubs/user/edit\\?continue=.*"))
-       .check(status.is(303))
-       .check(headerRegex("Location", ".*/(?:agent-registration/provide-details/match-application/.*|agents-external-stubs/user/edit\\?continue=.*)"))
+        .check(headerRegex("Location", "(.*/agents-external-stubs/user/(?:create|edit)\\?.*continue=.*)").saveAs("userEditPageUrl"))
 
+  // --------------------------------------------------
+  // Prove identity
+  // --------------------------------------------------
 
+  val getStubsUserEditPageAfterListDetails: HttpRequestBuilder =
+    http("Get Stubs User Edit Page After List Details")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("userEditPageUrl").as[String])
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
+      .check(
+        bodyString.transform { body =>
+          extractFormActionById(body, Seq("userForm", "initialUserDataForm"))
+        }.saveAs("stubsUserUpdateActionAfterListDetails")
+      )
+      .check(bodyString.transform(body => extractInputValue(body, "name")).saveAs("stubsUserNameAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "nino")).saveAs("stubsNinoAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "dateOfBirth.day")).saveAs("stubsDobDayAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "dateOfBirth.month")).saveAs("stubsDobMonthAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "dateOfBirth.year")).saveAs("stubsDobYearAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "groupId")).saveAs("groupIdAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line1")).saveAs("addressLine1AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line2")).saveAs("addressLine2AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line3")).saveAs("addressLine3AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line4")).saveAs("addressLine4AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.postcode")).saveAs("addressPostcodeAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "credentialRole")).saveAs("credentialRoleAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "credentialStrength")).saveAs("credentialStrengthAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "confidenceLevel")).saveAs("confidenceLevelAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "address.countryCode")).saveAs("addressCountryAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "assignedPrincipalEnrolments[0].key")).saveAs("principalEnrolmentKeyAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "assignedPrincipalEnrolments[0].identifiers[0].key")).saveAs("principalEnrolmentIdentifierKeyAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "assignedPrincipalEnrolments[0].identifiers[0].value")).saveAs("principalEnrolmentIdentifierValueAfterListDetails"))
+
+  val postStubsUserCreatePageAfterListDetails: HttpRequestBuilder =
+    http("Post Stubs User Create Page After List Details")
+      .post(session => {
+        val url     = session("stubsUserUpdateActionAfterListDetails").as[String]
+        val fullUrl = normalizeSignInLocation(url)
+
+        debug(s"[DEBUG] stubs user create/update action after list details = [$url]")
+        debug(s"[DEBUG] full stubs user create/update URL after list details = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{csrfToken}")
+      .formParam("affinityGroup", "Individual")
+      .formParam("principalEnrolmentService", "HMRC-PT")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeSignInLocation(loc)
+
+            debug(s"[DEBUG] Location after stubs user create after list details = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("stubsUserEditPageAfterCreateUrl")
+      )
+
+  val getStubsUserEditPageAfterCreate: HttpRequestBuilder =
+    http("Get Stubs User Edit Page After Create")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("stubsUserEditPageAfterCreateUrl").as[String])
+
+        debug(s"[DEBUG] stubs edit page after create URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
+      .check(
+        bodyString.transform { body =>
+          extractFormActionById(body, Seq("userForm"))
+        }.saveAs("stubsUserUpdateActionAfterCreate")
+      )
+      .check(bodyString.transform(body => extractInputValue(body, "nino")).saveAs("stubsNinoAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "dateOfBirth.day")).saveAs("stubsDobDayAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "dateOfBirth.month")).saveAs("stubsDobMonthAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "dateOfBirth.year")).saveAs("stubsDobYearAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "groupId")).saveAs("groupIdAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line1")).saveAs("addressLine1AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line2")).saveAs("addressLine2AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line3")).saveAs("addressLine3AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.line4")).saveAs("addressLine4AfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "address.postcode")).saveAs("addressPostcodeAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "credentialRole")).saveAs("credentialRoleAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "credentialStrength")).saveAs("credentialStrengthAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "confidenceLevel")).saveAs("confidenceLevelAfterListDetails"))
+      .check(bodyString.transform(body => extractSelectedOptionValue(body, "address.countryCode")).saveAs("addressCountryAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "assignedPrincipalEnrolments[0].key")).saveAs("principalEnrolmentKeyAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "assignedPrincipalEnrolments[0].identifiers[0].key")).saveAs("principalEnrolmentIdentifierKeyAfterListDetails"))
+      .check(bodyString.transform(body => extractInputValue(body, "assignedPrincipalEnrolments[0].identifiers[0].value")).saveAs("principalEnrolmentIdentifierValueAfterListDetails"))
+
+  val postStubsUserUpdatePageAfterCreate: HttpRequestBuilder =
+    http("Post Stubs User Update Page After Create")
+      .post(session => {
+        val url     = session("stubsUserUpdateActionAfterCreate").as[String]
+        val fullUrl = normalizeSignInLocation(url)
+
+        debug(s"[DEBUG] stubs user update action after create = [$url]")
+        debug(s"[DEBUG] full stubs user update URL after create = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{csrfToken}")
+      .formParam("name", "Test User")
+      .formParam("credentialRole", "#{credentialRoleAfterListDetails}")
+      .formParam("credentialStrength", "#{credentialStrengthAfterListDetails}")
+      .formParam("confidenceLevel", "#{confidenceLevelAfterListDetails}")
+      .formParam("nino", "#{stubsNinoAfterListDetails}")
+      .formParam("dateOfBirth.day", "#{stubsDobDayAfterListDetails}")
+      .formParam("dateOfBirth.month", "#{stubsDobMonthAfterListDetails}")
+      .formParam("dateOfBirth.year", "#{stubsDobYearAfterListDetails}")
+      .formParam("groupId", "#{groupIdAfterListDetails}")
+      .formParam("address.line1", "#{addressLine1AfterListDetails}")
+      .formParam("address.line2", "#{addressLine2AfterListDetails}")
+      .formParam("address.line3", "#{addressLine3AfterListDetails}")
+      .formParam("address.line4", "#{addressLine4AfterListDetails}")
+      .formParam("address.postcode", "#{addressPostcodeAfterListDetails}")
+      .formParam("address.countryCode", "#{addressCountryAfterListDetails}")
+      .formParam("assignedPrincipalEnrolments[0].key", "#{principalEnrolmentKeyAfterListDetails}")
+      .formParam("assignedPrincipalEnrolments[0].identifiers[0].key", "#{principalEnrolmentIdentifierKeyAfterListDetails}")
+      .formParam("assignedPrincipalEnrolments[0].identifiers[0].value", "#{principalEnrolmentIdentifierValueAfterListDetails}")
+      .formParam("assignedPrincipalEnrolments[1].key", "")
+      .formParam("assignedPrincipalEnrolments[1].identifiers[0].key", "")
+      .formParam("assignedPrincipalEnrolments[1].identifiers[0].value", "")
+      .formParam("assignedDelegatedEnrolments[0].key", "")
+      .formParam("assignedDelegatedEnrolments[0].identifiers[0].key", "")
+      .formParam("assignedDelegatedEnrolments[0].identifiers[0].value", "")
+      .formParam("utr", "")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+
+            debug(s"[DEBUG] Location after stubs user update after create = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("matchApplicationUrlFromContinue")
+      )
+
+  val getMatchApplicationPage: HttpRequestBuilder =
+    http("Get Match Application Page")
+      .get(session => {
+        val url     = session("matchApplicationUrlFromContinue").as[String]
+        val fullUrl = normalizeSignInLocation(url)
+
+        debug(s"[DEBUG] matchApplicationUrlFromContinue = [$url]")
+        debug(s"[DEBUG] actual match application GET URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("matchApplicationCsrfToken"))
+
+  val postConfirmMatchToIndividualProvidedDetailsYes: HttpRequestBuilder =
+    http("Post Confirm Match To Individual Provided Details Yes")
+      .post(session => {
+        val rawUrl = session("matchApplicationUrlFromContinue").as[String]
+
+        val fullUrl =
+          extractContinueUrl(rawUrl).getOrElse(normalizeSignInLocation(rawUrl))
+
+        debug(s"[DEBUG] raw matchApplicationUrlFromContinue for POST = [$rawUrl]")
+        debug(s"[DEBUG] actual match application POST URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{matchApplicationCsrfToken}")
+      .formParam("confirmMatchToIndividualProvidedDetails", "Yes")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform(normalizeToFrontend)
+          .saveAs("provideDetailsCheckYourAnswersUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterMatch: HttpRequestBuilder =
+    http("Get Provide Details Check Your Answers After Match")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersUrl").as[String])
+
+        debug(s"[DEBUG] provide details CYA URL after match = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+
+            debug(s"[DEBUG] Location from provide details CYA = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("individualSaUtrPageUrl")
+      )
+
+  val getIndividualSaUtrPage: HttpRequestBuilder =
+    http("Get Individual SA UTR Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("individualSaUtrPageUrl").as[String])
+
+        debug(s"[DEBUG] actual individual SA UTR page URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("individualSaUtrCsrfToken"))
+      .check(
+        bodyString.transform(extractFirstFormAction).saveAs("individualSaUtrFormAction")
+      )
+
+  val postIndividualSaUtrYes: HttpRequestBuilder =
+    http("Post Individual SA UTR Yes")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("individualSaUtrFormAction").as[String])
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{individualSaUtrCsrfToken}")
+      .formParam("individualSaUtr.hasSaUtr", "Yes")
+      .formParam("individualSaUtr.saUtr", "1234567890")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform(normalizeToFrontend)
+          .saveAs("provideDetailsCheckYourAnswersAfterUtrUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterUtr: HttpRequestBuilder =
+    http("Get Provide Details Check Your Answers After UTR")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterUtrUrl").as[String])
+
+        debug(s"[DEBUG] provide details CYA URL after UTR = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+
+            debug(s"[DEBUG] Location from provide details CYA after UTR = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("ucrIdentifiersUrl")
+      )
+
+  val getUnifiedCustomerRegistryIdentifiers: HttpRequestBuilder =
+    http("Get Unified Customer Registry Identifiers")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("ucrIdentifiersUrl").as[String])
+
+        debug(s"[DEBUG] UCR identifiers URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+
+            debug(s"[DEBUG] Location after UCR identifiers = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("provideDetailsCheckYourAnswersAfterUcrUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterUcr: HttpRequestBuilder =
+    http("Get Provide Details Check Your Answers After UCR")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterUcrUrl").as[String])
+
+        debug(s"[DEBUG] provide details CYA URL after UCR = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+
+            debug(s"[DEBUG] Location from provide details CYA after UCR = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("confirmationPageUrl")
+      )
+
+  val getConfirmationPage: HttpRequestBuilder =
+    http("Get Confirmation Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("confirmationPageUrl").as[String])
+
+        debug(s"[DEBUG] confirmation page URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(
+        bodyString.transform { body =>
+          val signBackInLinkRegex =
+            """<a[^>]*href="([^"]+)"[^>]*>\s*Sign back into your application\s*</a>""".r
+
+          signBackInLinkRegex.findFirstMatchIn(body) match {
+            case Some(m) => m.group(1).replace("&amp;", "&")
+            case None    => ""
+          }
+        }.saveAs("signBackIntoApplicationUrl")
+      )
+
+  val getSignBackIntoApplication: HttpRequestBuilder =
+    http("Get Sign Back Into Application")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("signBackIntoApplicationUrl").as[String])
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.in(303, 200))
+      .check(header("Location").saveAs("basGatewaySignInUrl"))
+
+  val getBasGatewaySignInPage: HttpRequestBuilder =
+    http("Get BAS Gateway Sign In Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("basGatewaySignInUrl").as[String])
+
+        debug(s"[DEBUG] BAS Gateway sign-in URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("basGatewaySignInRedirectUrl"))
+      .check(css("input[name=csrfToken]", "value").optional.saveAs("basGatewayCsrfToken"))
+      .check(
+        bodyString.transform(extractFirstFormAction).optional.saveAs("basGatewaySignInFormAction")
+      )
+
+  val followBasGatewaySignInRedirect: HttpRequestBuilder =
+    http("Follow BAS Gateway Sign In Redirect")
+      .get(session => {
+        val fullUrl = session("basGatewaySignInRedirectUrl").asOption[String]
+          .map(normalizeSignInLocation)
+          .getOrElse(normalizeSignInLocation(session("basGatewaySignInUrl").as[String]))
+
+        debug(s"[DEBUG] following BAS Gateway sign-in redirect to = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeSignInLocation(loc)
+
+            debug(s"[DEBUG] Location after task-list redirect to sign-in = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("finalBasGatewaySignInPageUrl")
+      )
+
+  val getFinalBasGatewaySignInPage: HttpRequestBuilder =
+    http("Get Final BAS Gateway Sign In Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("finalBasGatewaySignInPageUrl").as[String])
+
+        debug(s"[DEBUG] final BAS Gateway sign-in page URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").optional.saveAs("basGatewayCsrfToken"))
+      .check(
+        bodyString.transform(extractFirstFormAction).saveAs("basGatewaySignInFormAction")
+      )
+
+  val postBasGatewaySignIn: HttpRequestBuilder =
+    http("Post BAS Gateway Sign In")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("basGatewaySignInFormAction").as[String])
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .formParam("csrfToken", "#{basGatewayCsrfToken}")
+      .formParam("userId", "#{userId}")
+      .formParam("planetId", "#{planetId}")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform(normalizeToFrontend)
+          .saveAs("taskListUrlAfterFinalSignIn")
+      )
+
+  val getTaskListAfterFinalSignIn: HttpRequestBuilder =
+    http("Get Task List After Final Sign In")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("taskListUrlAfterFinalSignIn").as[String])
+
+        debug(s"[DEBUG] task list URL after final sign-in = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+
+  // --------------------------------------------------
+  // Declaration and submission
+  // --------------------------------------------------
+
+  val getAgentDeclarationPage: HttpRequestBuilder =
+    http("Get Agent Declaration Page")
+      .get(s"$baseUrl$route/agent-declaration/confirm-declaration")
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("agentDeclarationCsrfToken"))
+      .check(
+        bodyString.transform { body =>
+          val action = extractFirstFormAction(body)
+
+          if (action.nonEmpty) action
+          else "/agent-registration/apply/agent-declaration/confirm-declaration"
+        }.saveAs("agentDeclarationFormAction")
+      )
+
+  val postAgentDeclarationAcceptAndSend: HttpRequestBuilder =
+    http("Post Agent Declaration Accept And Send")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("agentDeclarationFormAction").as[String])
+
+        debug(s"[DEBUG] agent declaration POST URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{agentDeclarationCsrfToken}")
+      .formParam("submit", "AcceptAndSend")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform(normalizeToFrontend)
+          .saveAs("applicationStatusUrl")
+      )
+
+  val getApplicationStatusPage: HttpRequestBuilder =
+    http("Get Application Status Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("applicationStatusUrl").as[String])
+
+        debug(s"[DEBUG] application status URL = [$fullUrl]")
+
+        io.gatling.commons.validation.Success(fullUrl)
+      })
+      .check(status.is(200))
+      .check(substring("You’ve applied for an agent services account"))
 }
-

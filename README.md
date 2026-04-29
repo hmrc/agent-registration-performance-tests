@@ -21,7 +21,7 @@ sm2 --stop AGENT_REGISTRATION_FRONTEND
 ```
 Restart AGENT_REGISTRATION_FRONTEND in sbt with email verification turned off (to avoid email verification calls to the stubbed GRS service which are not supported):
 ```bash
-sbt -DignoreEmailVerification=true run
+sbt -DignoreEmailVerification=true -Dapplication.router=testOnlyDoNotUseInAppConf.Routes run
 ```
 
 ### Logging

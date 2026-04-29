@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-package uk.gov.hmrc.perftests.example
+package uk.gov.hmrc.perftests.mmtar
 
 import uk.gov.hmrc.performance.simulation.PerformanceTestRunner
-import uk.gov.hmrc.perftests.example.AgentRegistrationRequests._
+import uk.gov.hmrc.perftests.mmtar.AgentRegistrationRequests._
 
 class AgentRegistrationSimulation extends PerformanceTestRunner {
 
@@ -149,9 +149,34 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getGgSignInPageAfterListDetails,
     postSignInWithIndividualUser,
     getStubsUserEditPageAfterListDetails,
-    postStubsUserEditPageAfterListDetails
+    postStubsUserCreatePageAfterListDetails,
+    getStubsUserEditPageAfterCreate,
+    postStubsUserUpdatePageAfterCreate,
+    getMatchApplicationPage,
+    postConfirmMatchToIndividualProvidedDetailsYes,
+    getProvideDetailsCheckYourAnswersAfterMatch,
+    getIndividualSaUtrPage,
+    postIndividualSaUtrYes,
+    getProvideDetailsCheckYourAnswersAfterUtr,
+    getUnifiedCustomerRegistryIdentifiers,
+    getProvideDetailsCheckYourAnswersAfterUcr,
+    getConfirmationPage
   )
 
+  setup("sign-back-in-to-application", "Sign back in to application") withRequests (
+    getSignBackIntoApplication,
+    getBasGatewaySignInPage,
+    followBasGatewaySignInRedirect,
+    getFinalBasGatewaySignInPage,
+    postBasGatewaySignIn,
+    getTaskListAfterFinalSignIn,
+  )
+
+  setup("sign-declaration", "Sign Declaration") withRequests (
+    getAgentDeclarationPage,
+    postAgentDeclarationAcceptAndSend,
+    getApplicationStatusPage
+  )
 
   runSimulation()
 }
