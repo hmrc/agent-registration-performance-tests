@@ -36,6 +36,19 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
   private val emailVerificationBaseUrl =
     Try(baseUrlFor("email-verification")).getOrElse("http://localhost:9890")
 
+  private def debugUrl(label: String, fullUrl: String): io.gatling.commons.validation.Validation[String] = {
+    debug(s"[DEBUG] $label = [$fullUrl]")
+    io.gatling.commons.validation.Success(fullUrl)
+  }
+
+  private def frontendUrl(location: String): String =
+    if (location.startsWith("http")) location else s"$baseUrl$location"
+
+  private def stubsOrFrontendUrl(location: String): String =
+    if (location.startsWith("http")) location
+    else if (location.startsWith("/bas-gateway/")) s"$stubsUrl$location"
+    else s"$baseUrl$location"
+
   private def maybeNormalizeLocation(location: String): String =
     Option(location)
       .map(_.replace("&amp;", "&").trim)
@@ -141,19 +154,36 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .map(_.group(1).replace("&amp;", "&").trim)
       .getOrElse("")
 
+  private val agentsExternalStubsBaseUrl: String =
+    if (stubsUrl.contains("localhost")) stubsUrl
+    else s"$stubsUrl/agents-external-stubs"
+
+  private def normalizeAgentsExternalStubsAction(action: String): String = {
+    val cleaned = action.replace("&amp;", "&").trim
+
+    if (cleaned.startsWith("http")) cleaned
+    else if (cleaned.startsWith("/agents-external-stubs/")) s"$stubsUrl$cleaned"
+    else if (cleaned.startsWith("/")) s"$agentsExternalStubsUserBaseUrl$cleaned"
+    else s"$agentsExternalStubsUserBaseUrl/$cleaned"
+  }
+
+  private val agentsExternalStubsUserBaseUrl: String =
+    if (stubsUrl.endsWith("/agents-external-stubs")) stubsUrl
+    else s"$stubsUrl/agents-external-stubs"
+
   // --------------------------------------------------
   // Initial application setup
   // --------------------------------------------------
 
   val getAgentTypePage: HttpRequestBuilder =
     http("Get Agent Type Page")
-      .get(s"$baseUrl$route/about-your-business/agent-type")
+      .get(_ => debugUrl("Get Agent Type Page URL", s"$baseUrl$route/about-your-business/agent-type"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAgentTypeYes: HttpRequestBuilder =
     http("Post Agent Type - Yes")
-      .post(s"$baseUrl$route/about-your-business/agent-type")
+      .post(_ => debugUrl("Post Agent Type - Yes URL", s"$baseUrl$route/about-your-business/agent-type"))
       .formParam("agentType", "UkTaxAgent")
       .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
@@ -161,13 +191,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getBusinessTypePage: HttpRequestBuilder =
     http("Get Business Type Page")
-      .get(s"$baseUrl$route/about-your-business/business-type")
+      .get(_ => debugUrl("Get Business Type Page URL", s"$baseUrl$route/about-your-business/business-type"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postBusinessTypeSoleTrader: HttpRequestBuilder =
     http("Post Business Type - Sole Trader")
-      .post(s"$baseUrl$route/about-your-business/business-type")
+      .post(_ => debugUrl("Post Business Type - Sole Trader URL", s"$baseUrl$route/about-your-business/business-type"))
       .formParam("businessType", "SoleTrader")
       .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
@@ -175,13 +205,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getBusinessOwnerPage: HttpRequestBuilder =
     http("Get Business Owner Page")
-      .get(s"$baseUrl$route/about-your-business/user-role")
+      .get(_ => debugUrl("Get Business Owner Page URL", s"$baseUrl$route/about-your-business/user-role"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postBusinessOwnerTrue: HttpRequestBuilder =
     http("Post Business Owner - True")
-      .post(s"$baseUrl$route/about-your-business/user-role")
+      .post(_ => debugUrl("Post Business Owner - True URL", s"$baseUrl$route/about-your-business/user-role"))
       .formParam("userRole", "Owner")
       .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
@@ -189,13 +219,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getSignInPage: HttpRequestBuilder =
     http("Get Sign In Page")
-      .get(s"$baseUrl$route/about-your-business/agent-online-services-account")
+      .get(_ => debugUrl("Get Sign In Page URL", s"$baseUrl$route/about-your-business/agent-online-services-account"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postSignIn: HttpRequestBuilder =
     http("Post Sign In")
-      .post(s"$baseUrl$route/about-your-business/agent-online-services-account")
+      .post(_ => debugUrl("Post Sign In URL", s"$baseUrl$route/about-your-business/agent-online-services-account"))
       .formParam("typeOfSignIn", "HmrcOnlineServices")
       .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
@@ -203,17 +233,22 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getSignInInfoPage: HttpRequestBuilder =
     http("Get Sign In Info Page")
-      .get(s"$baseUrl$route/about-your-business/sign-in")
+      .get(_ => debugUrl("Get Sign In Info Page URL", s"$baseUrl$route/about-your-business/sign-in"))
       .check(status.is(200))
 
   val getContinueToSignIn: HttpRequestBuilder =
     http("Continue To Sign In")
-      .get(s"$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner")
+      .get(_ => debugUrl("Continue To Sign In URL", s"$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner"))
       .check(status.is(303))
 
   val getStubsSignInPage: HttpRequestBuilder =
     http("Get Stubs Sign In Page")
-      .get(s"$stubsUrl/bas-gateway/sign-in?continue_url=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner&origin=agent-registration-frontend&affinityGroup=agent")
+      .get(_ =>
+        debugUrl(
+          "Get Stubs Sign In Page URL",
+          s"$agentsExternalStubsBaseUrl/bas-gateway/sign-in?continue_url=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner&origin=agent-registration-frontend&affinityGroup=agent"
+        )
+      )
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
       .check(
@@ -225,7 +260,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val postStubsSignIn: HttpRequestBuilder =
     http("Post Stubs Sign In")
-      .post(s"$stubsUrl/gg/sign-in?continue=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner&origin=agent-registration-frontend")
+      .post(_ =>
+        debugUrl(
+          "Post Stubs Sign In URL",
+          s"$agentsExternalStubsBaseUrl/gg/sign-in?continue=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner&origin=agent-registration-frontend"
+        )
+      )
       .formParam("userId", "#{userId}")
       .formParam("planetId", "#{planetId}")
       .formParam("csrfToken", "#{csrfToken}")
@@ -233,7 +273,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getStubsUserCreatePage: HttpRequestBuilder =
     http("Get Stubs User Create Page")
-      .get(s"$stubsUrl/agents-external-stubs/user/create?continue=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner")
+      .get(_ =>
+        debugUrl(
+          "Get Stubs User Create Page URL",
+          s"$agentsExternalStubsUserBaseUrl/user/create?continue=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner"
+        )
+      )
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
       .check(
@@ -244,7 +289,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val postStubsUserCreatePage: HttpRequestBuilder =
     http("Post Stubs User Create Page")
-      .post(s"$stubsUrl#{stubsUserCreateAction}")
+      .post(session => {
+        val action  = session("stubsUserCreateAction").as[String]
+        val fullUrl = normalizeAgentsExternalStubsAction(action)
+
+        debugUrl("Post Stubs User Create Page URL", fullUrl)
+      })
       .formParam("affinityGroup", "Agent")
       .formParam("principalEnrolmentService", "none")
       .formParam("csrfToken", "#{csrfToken}")
@@ -253,7 +303,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getStubsUserEditPage: HttpRequestBuilder =
     http("Get Stubs User Edit Page")
-      .get(s"$stubsUrl/agents-external-stubs/user/edit?continue=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner")
+      .get(_ =>
+        debugUrl(
+          "Get Stubs User Edit Page URL",
+          s"$agentsExternalStubsUserBaseUrl/user/edit?continue=$baseUrl$route/internal/initiate-agent-application/uk-tax-agent/sole-trader/owner"
+        )
+      )
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
       .check(
@@ -273,7 +328,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val postStubsUserEditPage: HttpRequestBuilder =
     http("Post Stubs User Edit Page")
-      .post(s"$stubsUrl#{stubsUserEditAction}")
+      .post(session => {
+        val action  = session("stubsUserEditAction").as[String]
+        val fullUrl = normalizeAgentsExternalStubsAction(action)
+
+        debugUrl("Post Stubs User Edit Page URL", fullUrl)
+      })
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("groupId", "#{groupId}")
       .formParam("credentialRole", "User")
@@ -290,17 +350,21 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getInitiateAgentApplicationPage: HttpRequestBuilder =
     http("Get Initiate Agent Application Page")
-      .get("#{initiateAgentApplicationUrl}")
+      .get(session => debugUrl("Get Initiate Agent Application Page URL", session("initiateAgentApplicationUrl").as[String]))
       .check(status.is(303))
       .check(
         header("Location")
-          .transform(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .transform { loc =>
+            val fullLocation = frontendUrl(loc)
+            debug(s"[DEBUG] Location after initiate agent application = [$fullLocation]")
+            fullLocation
+          }
           .saveAs("grsTestDataUrl")
       )
 
   val getGrsTestDataPage: HttpRequestBuilder =
     http("Get GRS Test Data Page")
-      .get("#{grsTestDataUrl}")
+      .get(session => debugUrl("Get GRS Test Data Page URL", session("grsTestDataUrl").as[String]))
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("grsRedirectUrl"))
       .check(css("input[name=csrfToken]", "value").optional.saveAs("csrfToken"))
@@ -309,10 +373,10 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get GRS Form If Needed")
       .get(session => {
         val url = session("grsRedirectUrl").asOption[String]
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .orElse(session("grsTestDataUrl").asOption[String])
-          .getOrElse("#{grsTestDataUrl}")
-        url
+          .getOrElse(session("grsTestDataUrl").as[String])
+        debugUrl("Get GRS Form If Needed URL", url)
       })
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
@@ -329,7 +393,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
         val action = session("grsFormAction").asOption[String]
           .map(a => if (a.startsWith("http")) a else s"$baseUrl$a")
           .getOrElse(session("grsTestDataUrl").as[String])
-        action
+        debugUrl("Post GRS Test Data Page URL", action)
       })
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("registrationStatus", "GrsRegistered")
@@ -345,8 +409,9 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
   val getTaskListPage: HttpRequestBuilder =
     http("Get Task List Page")
       .get(session => {
-        val url = session("taskListUrl").as[String]
-        if (url.startsWith("http")) url else s"$baseUrl$url"
+        val url     = session("taskListUrl").as[String]
+        val fullUrl = frontendUrl(url)
+        debugUrl("Get Task List Page URL", fullUrl)
       })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("taskListInitialRedirectUrl"))
@@ -366,12 +431,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
   val enterApplicantDetailsFromTaskList: HttpRequestBuilder =
     http("Enter Applicant Details From Task List")
       .get(session => {
-        session("applicantDetailsEntryUrl").asOption[String]
+        val fullUrl = session("applicantDetailsEntryUrl").asOption[String]
           .map(_.trim)
           .filter(_.nonEmpty)
-          .map(url => if (url.startsWith("http")) url else s"$baseUrl$url")
-          .map(io.gatling.commons.validation.Success(_))
-          .getOrElse(io.gatling.commons.validation.Success(s"$baseUrl$route/task-list"))
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Enter Applicant Details From Task List URL", fullUrl)
       })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("applicantDetailsRedirectUrl"))
@@ -392,14 +457,14 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Follow Applicant Details Initial Redirect")
       .get(session => {
         session("applicantDetailsRedirectUrl").asOption[String]
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .orElse(
             session("applicantDetailsEntryUrl").asOption[String]
               .map(_.trim)
               .filter(_.nonEmpty)
-              .map(url => if (url.startsWith("http")) url else s"$baseUrl$url")
+              .map(frontendUrl)
           )
-          .map(io.gatling.commons.validation.Success(_))
+          .map(url => debugUrl("Follow Applicant Details Initial Redirect URL", url))
           .getOrElse(io.gatling.commons.validation.Failure("Applicant details entry URL missing from task-list response"))
       })
       .check(status.in(200, 303))
@@ -414,9 +479,9 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .orElse(session("applicantDetailsEntryUrl").asOption[String])
           .map(_.trim)
           .filter(_.nonEmpty)
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl$route/applicant/applicant-name")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Follow Applicant Details Redirect If Needed URL", url)
       })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("applicantDetailsRedirectUrl3"))
@@ -424,13 +489,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getApplicantNamePage: HttpRequestBuilder =
     http("Get Applicant Name Page")
-      .get(s"$baseUrl$route/applicant/applicant-name")
+      .get(_ => debugUrl("Get Applicant Name Page URL", s"$baseUrl$route/applicant/applicant-name"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postApplicantName: HttpRequestBuilder =
     http("Post Applicant Name")
-      .post(s"$baseUrl$route/applicant/applicant-name")
+      .post(_ => debugUrl("Post Applicant Name URL", s"$baseUrl$route/applicant/applicant-name"))
       .formParam("authorisedName", "Test User")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -439,13 +504,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getTelephoneNumberPage: HttpRequestBuilder =
     http("Get Telephone Number Page")
-      .get(s"$baseUrl$route/applicant/telephone-number")
+      .get(_ => debugUrl("Get Telephone Number Page URL", s"$baseUrl$route/applicant/telephone-number"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postTelephoneNumber: HttpRequestBuilder =
     http("Post Telephone Number")
-      .post(s"$baseUrl$route/applicant/telephone-number")
+      .post(_ => debugUrl("Post Telephone Number URL", s"$baseUrl$route/applicant/telephone-number"))
       .formParam("telephoneNumber", "07777777777")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -453,26 +518,30 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getEmailAddressPage: HttpRequestBuilder =
     http("Get Email Address Page")
-      .get(s"$baseUrl$route/applicant/email-address")
+      .get(_ => debugUrl("Get Email Address Page URL", s"$baseUrl$route/applicant/email-address"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postEmailAddress: HttpRequestBuilder =
     http("Post Email Address")
-      .post(s"$baseUrl$route/applicant/email-address")
+      .post(_ => debugUrl("Post Email Address URL", s"$baseUrl$route/applicant/email-address"))
       .formParam("emailAddress", "test@test.com")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
       .check(status.is(303))
       .check(
         header("Location")
-          .transform(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .transform { loc =>
+            val fullLocation = frontendUrl(loc)
+            debug(s"[DEBUG] Location after Post Email Address = [$fullLocation]")
+            fullLocation
+          }
           .saveAs("verifyEmailPageUrl")
       )
 
   val getVerifyEmailPage: HttpRequestBuilder =
     http("Get Verify Email Page")
-      .get("#{verifyEmailPageUrl}")
+      .get(session => debugUrl("Get Verify Email Page URL", session("verifyEmailPageUrl").as[String]))
       .check(status.in(200, 303))
       .check(
         header("Location")
@@ -488,7 +557,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
   val getEmailVerificationPasscodesPage: HttpRequestBuilder =
     http("Get Email Verification Passcodes Page")
       .get(session => {
-        passcodesPageUrlFromSession(session)
+        val validation = passcodesPageUrlFromSession(session)
           .map(io.gatling.commons.validation.Success(_))
           .getOrElse {
             emailVerificationUrlFromSession(session).map { emailVerificationLink =>
@@ -496,6 +565,8 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
               s"$baseUrl/agent-registration/test-only/email-verification-pass-codes?emailVerificationLink=$encodedLink"
             }
           }
+
+        validation.flatMap(url => debugUrl("Get Email Verification Passcodes Page URL", url))
       })
       .check(status.is(200))
       .check(
@@ -517,7 +588,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getEmailVerificationEntryPage: HttpRequestBuilder =
     http("Get Email Verification Entry Page")
-      .get(session => emailVerificationUrlFromSession(session))
+      .get(session => emailVerificationUrlFromSession(session).flatMap(url => debugUrl("Get Email Verification Entry Page URL", url)))
       .check(status.is(200))
       .check(regex("""<input[^>]*name=\"passcode\"""").exists)
       .check(
@@ -534,11 +605,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Post Email Verification Code")
       .post(session => {
         val action = session.attributes.get("emailVerificationFormAction").collect { case s: String => s }
-        action
+        val validation = action
           .map(a => normalizeEmailVerificationAction(a, session))
           .filter(_.nonEmpty)
           .map(io.gatling.commons.validation.Success(_))
           .getOrElse(emailVerificationUrlFromSession(session))
+
+        validation.flatMap(url => debugUrl("Post Email Verification Code URL", url))
       })
       .formParam("passcode", "#{emailVerificationCode}")
       .formParam("csrfToken", "#{csrfToken}")
@@ -549,23 +622,23 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Email Verification Redirect Page")
       .get(session => {
         val location = session("postEmailVerificationRedirectUrl").as[String]
-        if (location.startsWith("http")) location else s"$baseUrl$location"
+        val fullUrl  = frontendUrl(location)
+        debugUrl("Get Email Verification Redirect Page URL", fullUrl)
       })
       .check(status.is(303))
       .check(header("Location").is("/agent-registration/apply/applicant/check-your-answers"))
 
   val getApplicantCheckYourAnswersPage: HttpRequestBuilder =
     http("Get Applicant Check Your Answers Page")
-      .get(s"$baseUrl$route/applicant/check-your-answers")
+      .get(_ => debugUrl("Get Applicant Check Your Answers Page URL", s"$baseUrl$route/applicant/check-your-answers"))
       .check(status.is(200))
       .check(substring("Check your answers"))
       .check(regex("""href="/agent-registration/apply/task-list"""").exists)
       .check(css("input[name=csrfToken]", "value").optional.saveAs("csrfToken"))
 
-  // 1) Click "Confirm and continue" from applicant CYA (it's a GET link, not a POST form)
   val goToTaskListFromApplicantCya: HttpRequestBuilder =
     http("Go To Task List From Applicant CYA")
-      .get(s"$baseUrl$route/task-list")
+      .get(_ => debugUrl("Go To Task List From Applicant CYA URL", s"$baseUrl$route/task-list"))
       .header("Referer", s"$baseUrl$route/applicant/check-your-answers")
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("taskListRedirect1"))
@@ -581,29 +654,25 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       )
       .check(bodyString.transform(extractAgentDetailsTaskLink).optional.saveAs("agentDetailsEntryUrl"))
 
-  // 2) Follow first redirect if present
   val followTaskListRedirect1: HttpRequestBuilder =
     http("Follow Task List Redirect 1")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("taskListRedirect1").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("taskListRedirect1").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect 1 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("taskListRedirect2"))
 
-  // 3) Follow second redirect if present and ONLY THEN assert task-list HTML
   val followTaskListRedirect2AndExtractAgentDetails: HttpRequestBuilder =
     http("Follow Task List Redirect 2 And Extract Agent Details")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("taskListRedirect2").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("taskListRedirect2").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect 2 And Extract Agent Details URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("taskListRedirect3"))
       .check(
@@ -619,13 +688,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val followTaskListRedirect3AndExtractAgentDetails: HttpRequestBuilder =
     http("Follow Task List Redirect 3 And Extract Agent Details")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("taskListRedirect3").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("taskListRedirect3").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect 3 And Extract Agent Details URL", fullUrl)
+      })
       .check(status.is(200))
       .check(
         bodyString.transform { body =>
@@ -639,30 +707,27 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .check(bodyString.transform(extractAgentDetailsTaskLink).saveAs("agentDetailsEntryUrl"))
       .check(regex("""href=['"][^'"]*(?:/agent-registration)?/apply/agent-details(?:/[^'"]*)?['"]""").exists)
 
-  // 4) Enter agent-details section (fallback to direct route if link missing)
   val enterAgentDetailsFromTaskList: HttpRequestBuilder =
     http("Enter Agent Details From Task List")
       .get(session =>
         session("agentDetailsEntryUrl").asOption[String]
           .map(_.trim)
           .filter(_.nonEmpty)
-          .map(url => if (url.startsWith("http")) url else s"$baseUrl$url")
-          .map(io.gatling.commons.validation.Success(_))
+          .map(frontendUrl)
+          .map(url => debugUrl("Enter Agent Details From Task List URL", url))
           .getOrElse(io.gatling.commons.validation.Failure("Agent details entry URL missing from task-list response"))
       )
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentDetailsRedirectUrl"))
 
-  // When accessing agent details from task list, the application redirects to CYA which then
-  // checks for unanswered questions and redirects to the first unanswered page if needed.
   val getAgentDetailsCheckYourAnswersPage: HttpRequestBuilder =
     http("Get Agent Details Check Your Answers Page")
       .get(session => {
         session("agentDetailsEntryUrl").asOption[String]
           .map(_.trim)
           .filter(_.nonEmpty)
-          .map(url => if (url.startsWith("http")) url else s"$baseUrl$url")
-          .map(io.gatling.commons.validation.Success(_))
+          .map(frontendUrl)
+          .map(url => debugUrl("Get Agent Details Check Your Answers Page URL", url))
           .getOrElse(io.gatling.commons.validation.Failure("Agent details entry URL missing from task-list response"))
       })
       .check(status.in(200, 303))
@@ -694,14 +759,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .saveAs("agentDetailsNextUrl")
       )
 
-  // Follow any redirect from the agent details entry point (typically to CYA or first unanswered page)
   val followAgentDetailsInitialRedirect: HttpRequestBuilder =
     http("Follow Agent Details Initial Redirect")
       .get(session => {
         val url = session("agentDetailsRedirectUrl").asOption[String]
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl$route/agent-details/check-your-answers")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Follow Agent Details Initial Redirect URL", url)
       })
       .check(status.is(200))
       .check(
@@ -719,9 +783,9 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Follow Agent Details Redirect If Needed")
       .get(session => {
         val url = session("agentDetailsRedirectUrl").asOption[String]
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl$route/agent-details/business-name")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Follow Agent Details Redirect If Needed URL", url)
       })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentDetailsRedirectUrl2"))
@@ -731,9 +795,9 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Follow Agent Details Redirect If Needed 2")
       .get(session => {
         val url = session("agentDetailsRedirectUrl2").asOption[String]
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl$route/agent-details/business-name")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Follow Agent Details Redirect If Needed 2 URL", url)
       })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentDetailsRedirectUrl3"))
@@ -742,13 +806,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
   val getBusinessNamePage: HttpRequestBuilder =
     http("Get Business Name Page")
       .get(session => {
-        // Try to use redirect from agent details section, otherwise use direct URL
         val url = session("agentDetailsRedirectUrl").asOption[String]
           .orElse(session("agentDetailsRedirectUrl2").asOption[String])
           .orElse(session("agentDetailsRedirectUrl3").asOption[String])
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl$route/agent-details/business-name")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Get Business Name Page URL", url)
       })
       .check(status.is(200))
       .check(
@@ -764,7 +827,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val postBusinessName: HttpRequestBuilder =
     http("Post Business Name")
-      .post(s"$baseUrl$route/agent-details/business-name")
+      .post(_ => debugUrl("Post Business Name URL", s"$baseUrl$route/agent-details/business-name"))
       .formParam("agentBusinessName", "Test User")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -780,13 +843,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAgentTelephoneNumberPage: HttpRequestBuilder =
     http("Get Agent Telephone Number Page")
-      .get(s"$baseUrl$route/agent-details/telephone-number")
+      .get(_ => debugUrl("Get Agent Telephone Number Page URL", s"$baseUrl$route/agent-details/telephone-number"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAgentTelephoneNumber: HttpRequestBuilder =
     http("Post Agent Telephone Number")
-      .post(s"$baseUrl$route/agent-details/telephone-number")
+      .post(_ => debugUrl("Post Agent Telephone Number URL", s"$baseUrl$route/agent-details/telephone-number"))
       .formParam("agentTelephoneNumber", "01234567890")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -798,13 +861,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAgentEmailPage: HttpRequestBuilder =
     http("Get Agent Email Page")
-      .get(s"$baseUrl$route/agent-details/email-address")
+      .get(_ => debugUrl("Get Agent Email Page URL", s"$baseUrl$route/agent-details/email-address"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAgentEmail: HttpRequestBuilder =
     http("Post Agent Email")
-      .post(s"$baseUrl$route/agent-details/email-address")
+      .post(_ => debugUrl("Post Agent Email URL", s"$baseUrl$route/agent-details/email-address"))
       .formParam("agentEmailAddress", "test@test.com")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -820,13 +883,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAgentCorrespondenceAddressPage: HttpRequestBuilder =
     http("Get Agent Correspondence Address Page")
-      .get(s"$baseUrl$route/agent-details/correspondence-address")
+      .get(_ => debugUrl("Get Agent Correspondence Address Page URL", s"$baseUrl$route/agent-details/correspondence-address"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAgentCorrespondenceAddress: HttpRequestBuilder =
     http("Post Agent Correspondence Address")
-      .post(s"$baseUrl$route/agent-details/correspondence-address")
+      .post(_ => debugUrl("Post Agent Correspondence Address URL", s"$baseUrl$route/agent-details/correspondence-address"))
       .formParam("agentCorrespondenceAddress", "1 Test Street, Test Area, TE1 1ST, GB")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -842,14 +905,14 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAgentCheckYourAnswersPage: HttpRequestBuilder =
     http("Get Agent Check Your Answers Page")
-      .get(s"$baseUrl$route/agent-details/check-your-answers")
+      .get(_ => debugUrl("Get Agent Check Your Answers Page URL", s"$baseUrl$route/agent-details/check-your-answers"))
       .check(status.is(200))
       .check(substring("Check your answers"))
       .check(regex("""href="/agent-registration/apply/task-list"""").exists)
 
   val goToTaskListFromAgentCya: HttpRequestBuilder =
     http("Go To Task List From Agent CYA")
-      .get(s"$baseUrl$route/task-list")
+      .get(_ => debugUrl("Go To Task List From Agent CYA URL", s"$baseUrl$route/task-list"))
       .header("Referer", s"$baseUrl$route/agent-details/check-your-answers")
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentTaskListRedirect1"))
@@ -866,37 +929,34 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val followTaskListRedirectAfterAgentCya1: HttpRequestBuilder =
     http("Follow Task List Redirect After Agent CYA 1")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("agentTaskListRedirect1").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("agentTaskListRedirect1").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent CYA 1 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentTaskListRedirect2"))
 
   val followTaskListRedirectAfterAgentCya2: HttpRequestBuilder =
     http("Follow Task List Redirect After Agent CYA 2")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("agentTaskListRedirect2").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("agentTaskListRedirect2").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent CYA 2 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentTaskListRedirect3"))
 
   val followTaskListRedirectAfterAgentCya3: HttpRequestBuilder =
     http("Follow Task List Redirect After Agent CYA 3")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("agentTaskListRedirect3").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("agentTaskListRedirect3").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent CYA 3 URL", fullUrl)
+      })
       .check(status.is(200))
       .check(
         bodyString.transform { body =>
@@ -910,13 +970,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAmlSupervisorNamePage: HttpRequestBuilder =
     http("Get AML Supervisor Name Page")
-      .get(s"$baseUrl$route/anti-money-laundering/supervisor-name")
+      .get(_ => debugUrl("Get AML Supervisor Name Page URL", s"$baseUrl$route/anti-money-laundering/supervisor-name"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAmlSupervisorName: HttpRequestBuilder =
     http("Post AML Supervisor Name")
-      .post(s"$baseUrl$route/anti-money-laundering/supervisor-name")
+      .post(_ => debugUrl("Post AML Supervisor Name URL", s"$baseUrl$route/anti-money-laundering/supervisor-name"))
       .formParam("amlsSupervisoryBody", "HMRC")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -932,13 +992,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAmlRegistrationNumberPage: HttpRequestBuilder =
     http("Get AML Registration Number Page")
-      .get(s"$baseUrl$route/anti-money-laundering/registration-number")
+      .get(_ => debugUrl("Get AML Registration Number Page URL", s"$baseUrl$route/anti-money-laundering/registration-number"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAmlRegistrationNumber: HttpRequestBuilder =
     http("Post AML Registration Number")
-      .post(s"$baseUrl$route/anti-money-laundering/registration-number")
+      .post(_ => debugUrl("Post AML Registration Number URL", s"$baseUrl$route/anti-money-laundering/registration-number"))
       .formParam("amlsRegistrationNumber", "XAML00000123456")
       .formParam("csrfToken", "#{csrfToken}")
       .formParam("submit", "SaveAndContinue")
@@ -954,14 +1014,14 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAmlCheckYourAnswersPage: HttpRequestBuilder =
     http("Get AML Check Your Answers Page")
-      .get(s"$baseUrl$route/anti-money-laundering/check-your-answers")
+      .get(_ => debugUrl("Get AML Check Your Answers Page URL", s"$baseUrl$route/anti-money-laundering/check-your-answers"))
       .check(status.is(200))
       .check(substring("Check your answers"))
       .check(regex("""href="/agent-registration/apply/task-list"""").exists)
 
   val goToTaskListFromAmlCya: HttpRequestBuilder =
     http("Go To Task List From AML CYA")
-      .get(s"$baseUrl$route/task-list")
+      .get(_ => debugUrl("Go To Task List From AML CYA URL", s"$baseUrl$route/task-list"))
       .header("Referer", s"$baseUrl$route/anti-money-laundering/check-your-answers")
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("amlTaskListRedirect1"))
@@ -978,37 +1038,34 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val followTaskListRedirectAfterAmlCya1: HttpRequestBuilder =
     http("Follow Task List Redirect After AML CYA 1")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("amlTaskListRedirect1").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("amlTaskListRedirect1").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After AML CYA 1 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("amlTaskListRedirect2"))
 
   val followTaskListRedirectAfterAmlCya2: HttpRequestBuilder =
     http("Follow Task List Redirect After AML CYA 2")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("amlTaskListRedirect2").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("amlTaskListRedirect2").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After AML CYA 2 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("amlTaskListRedirect3"))
 
   val followTaskListRedirectAfterAmlCya3: HttpRequestBuilder =
     http("Follow Task List Redirect After AML CYA 3")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("amlTaskListRedirect3").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("amlTaskListRedirect3").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After AML CYA 3 URL", fullUrl)
+      })
       .check(status.is(200))
       .check(
         bodyString.transform { body =>
@@ -1022,13 +1079,13 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAgentStandardAcceptPage: HttpRequestBuilder =
     http("Get Agent Standard Accept Page")
-      .get(s"$baseUrl$route/agent-standard/accept-agent-standard")
+      .get(_ => debugUrl("Get Agent Standard Accept Page URL", s"$baseUrl$route/agent-standard/accept-agent-standard"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
 
   val postAgentStandardAccept: HttpRequestBuilder =
     http("Post Agent Standard Accept")
-      .post(s"$baseUrl$route/agent-standard/accept-agent-standard")
+      .post(_ => debugUrl("Post Agent Standard Accept URL", s"$baseUrl$route/agent-standard/accept-agent-standard"))
       .formParam("submit", "AgreeAndContinue")
       .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
@@ -1042,37 +1099,34 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val followTaskListRedirectAfterAgentStandard1: HttpRequestBuilder =
     http("Follow Task List Redirect After Agent Standard 1")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("agentStandardTaskListRedirect1").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("agentStandardTaskListRedirect1").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent Standard 1 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentStandardTaskListRedirect2"))
 
   val followTaskListRedirectAfterAgentStandard2: HttpRequestBuilder =
     http("Follow Task List Redirect After Agent Standard 2")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("agentStandardTaskListRedirect2").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("agentStandardTaskListRedirect2").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent Standard 2 URL", fullUrl)
+      })
       .check(status.in(200, 303))
       .check(header("Location").optional.saveAs("agentStandardTaskListRedirect3"))
 
   val followTaskListRedirectAfterAgentStandard3: HttpRequestBuilder =
     http("Follow Task List Redirect After Agent Standard 3")
-      .get(session =>
-        io.gatling.commons.validation.Success(
-          session("agentStandardTaskListRedirect3").asOption[String]
-            .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
-            .getOrElse(s"$baseUrl$route/task-list")
-        )
-      )
+      .get(session => {
+        val fullUrl = session("agentStandardTaskListRedirect3").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent Standard 3 URL", fullUrl)
+      })
       .check(status.is(200))
       .check(
         bodyString.transform { body =>
@@ -1091,9 +1145,9 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
         val url = session("listDetailsEntryUrl").asOption[String]
           .map(_.trim)
           .filter(_.nonEmpty)
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl$route/list-details/sole-trader")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Get List Details Sole Trader Page URL", url)
       })
       .check(status.is(200))
       .check(bodyString.transform(extractListDetailsContinueLink).saveAs("listDetailsContinueUrl"))
@@ -1104,90 +1158,91 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
         val url = session("listDetailsContinueUrl").asOption[String]
           .map(_.trim)
           .filter(_.nonEmpty)
-          .map(loc => if (loc.startsWith("http")) loc else s"$baseUrl$loc")
+          .map(frontendUrl)
           .getOrElse(s"$baseUrl/agent-registration/sign-out-with-continue")
-        io.gatling.commons.validation.Success(url)
+        debugUrl("Post List Details Sole Trader Continue URL", url)
       })
       .check(status.is(303))
       .check(header("Location").saveAs("listDetailsSignInRedirectUrl"))
 
-   val followListDetailsSignOutRedirectToSignIn: HttpRequestBuilder =
-     http("Follow List Details Sign Out Redirect To Sign In")
-       .get(session => {
-         val url = session("listDetailsSignInRedirectUrl").as[String]
-         if (url.startsWith("http")) io.gatling.commons.validation.Success(url)
-         else if (url.startsWith("/bas-gateway/")) io.gatling.commons.validation.Success(s"$stubsUrl$url")
-         else io.gatling.commons.validation.Success(s"$baseUrl$url")
-       })
-       .check(status.is(303))
-       .check(header("Location").transform(normalizeSignInLocation).saveAs("signInPageUrl"))
-       .check(header("Location").transform(normalizeSignInLocation).saveAs("listDetailsBasSignInUrl"))
+  val followListDetailsSignOutRedirectToSignIn: HttpRequestBuilder =
+    http("Follow List Details Sign Out Redirect To Sign In")
+      .get(session => {
+        val url     = session("listDetailsSignInRedirectUrl").as[String]
+        val fullUrl = stubsOrFrontendUrl(url)
+        debugUrl("Follow List Details Sign Out Redirect To Sign In URL", fullUrl)
+      })
+      .check(status.is(303))
+      .check(header("Location").transform(normalizeSignInLocation).saveAs("signInPageUrl"))
+      .check(header("Location").transform(normalizeSignInLocation).saveAs("listDetailsBasSignInUrl"))
 
-    val getSignInPageAfterListDetails: HttpRequestBuilder =
-      http("Get Sign In Page After List Details")
-        .get(session => {
-          val url = session("listDetailsBasSignInUrl").asOption[String]
-            .orElse(session("signInPageUrl").asOption[String])
-            .map(normalizeSignInLocation)
-            .getOrElse(s"$stubsUrl/bas-gateway/sign-in")
-          io.gatling.commons.validation.Success(url)
-        })
-        .check(status.in(200, 303))
-        .check(
-          header("Location")
-            .transform(normalizeSignInLocation)
-            .optional
-            .saveAs("listDetailsSignInNextUrl")
-        )
-        .check(
-          regex("""<form[^>]*action=\"([^\"]+)\"[^>]*id=\"loginForm\"""")
-            .transform(normalizeSignInLocation)
-            .optional
-            .saveAs("listDetailsGgSignInAction")
-        )
+  val getSignInPageAfterListDetails: HttpRequestBuilder =
+    http("Get Sign In Page After List Details")
+      .get(session => {
+        val url = session("listDetailsBasSignInUrl").asOption[String]
+          .orElse(session("signInPageUrl").asOption[String])
+          .map(normalizeSignInLocation)
+          .getOrElse(s"$stubsUrl/bas-gateway/sign-in")
+        debugUrl("Get Sign In Page After List Details URL", url)
+      })
+      .check(status.in(200, 303))
+      .check(
+        header("Location")
+          .transform(normalizeSignInLocation)
+          .optional
+          .saveAs("listDetailsSignInNextUrl")
+      )
+      .check(
+        regex("""<form[^>]*action=\"([^\"]+)\"[^>]*id=\"loginForm\"""")
+          .transform(normalizeSignInLocation)
+          .optional
+          .saveAs("listDetailsGgSignInAction")
+      )
 
-   val getGgSignInPageAfterListDetails: HttpRequestBuilder =
-     http("Get GG Sign In Page After List Details")
-       .get(session => {
-         val url = session("listDetailsSignInNextUrl").asOption[String]
-           .orElse(session("listDetailsBasSignInUrl").asOption[String])
-           .orElse(session("signInPageUrl").asOption[String])
-           .map(normalizeSignInLocation)
-           .getOrElse(s"$stubsUrl/bas-gateway/sign-in")
-         io.gatling.commons.validation.Success(url)
-       })
-       .check(status.is(200))
-       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
-       .check(
-         regex("""<form[^>]*action=\"([^\"]+)\"[^>]*id=\"loginForm\"""")
-           .transform(normalizeSignInLocation)
-           .optional
-           .saveAs("listDetailsGgSignInAction")
-       )
-        .check(
-          bodyString.transform(_ => s"perf-${UUID.randomUUID().toString.take(8)}").saveAs("individualUserId")
-        )
+  val getGgSignInPageAfterListDetails: HttpRequestBuilder =
+    http("Get GG Sign In Page After List Details")
+      .get(session => {
+        val url = session("listDetailsSignInNextUrl").asOption[String]
+          .orElse(session("listDetailsBasSignInUrl").asOption[String])
+          .orElse(session("signInPageUrl").asOption[String])
+          .map(normalizeSignInLocation)
+          .getOrElse(s"$stubsUrl/bas-gateway/sign-in")
+        debugUrl("Get GG Sign In Page After List Details URL", url)
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
+      .check(
+        regex("""<form[^>]*action=\"([^\"]+)\"[^>]*id=\"loginForm\"""")
+          .transform(normalizeSignInLocation)
+          .optional
+          .saveAs("listDetailsGgSignInAction")
+      )
+      .check(
+        bodyString.transform(_ => s"perf-${UUID.randomUUID().toString.take(8)}").saveAs("individualUserId")
+      )
 
-     val postSignInWithIndividualUser: HttpRequestBuilder =
-      http("Post Sign In With Individual User")
-        .post(session => {
-          session("listDetailsGgSignInAction").asOption[String]
-            .filter(_.nonEmpty)
-            .map(io.gatling.commons.validation.Success(_))
-            .getOrElse {
-              session("listDetailsBasSignInUrl").asOption[String]
-                .orElse(session("signInPageUrl").asOption[String])
-                .map(normalizeSignInLocation)
-                .flatMap(ggSignInUrlFromBasUrl)
-                .map(io.gatling.commons.validation.Success(_))
-                .getOrElse(io.gatling.commons.validation.Failure("Unable to derive GG sign-in URL from BAS sign-in redirect"))
-            }
-        })
-        .formParam("userId", "#{individualUserId}")
-        .formParam("planetId", "#{planetId}")
-        .formParam("csrfToken", "#{csrfToken}")
-        .check(status.is(303))
-        .check(headerRegex("Location", "(.*/agents-external-stubs/user/(?:create|edit)\\?.*continue=.*)").saveAs("userEditPageUrl"))
+  val postSignInWithIndividualUser: HttpRequestBuilder =
+    http("Post Sign In With Individual User")
+      .post(session => {
+        val validation = session("listDetailsGgSignInAction").asOption[String]
+          .filter(_.nonEmpty)
+          .map(io.gatling.commons.validation.Success(_))
+          .getOrElse {
+            session("listDetailsBasSignInUrl").asOption[String]
+              .orElse(session("signInPageUrl").asOption[String])
+              .map(normalizeSignInLocation)
+              .flatMap(ggSignInUrlFromBasUrl)
+              .map(io.gatling.commons.validation.Success(_))
+              .getOrElse(io.gatling.commons.validation.Failure("Unable to derive GG sign-in URL from BAS sign-in redirect"))
+          }
+
+        validation.flatMap(url => debugUrl("Post Sign In With Individual User URL", url))
+      })
+      .formParam("userId", "#{individualUserId}")
+      .formParam("planetId", "#{planetId}")
+      .formParam("csrfToken", "#{csrfToken}")
+      .check(status.is(303))
+      .check(headerRegex("Location", "(.*/agents-external-stubs/user/(?:create|edit)\\?.*continue=.*)").saveAs("userEditPageUrl"))
 
   // --------------------------------------------------
   // Prove identity
@@ -1197,8 +1252,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Stubs User Edit Page After List Details")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("userEditPageUrl").as[String])
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Stubs User Edit Page After List Details URL", fullUrl)
       })
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
@@ -1233,9 +1287,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
         val fullUrl = normalizeSignInLocation(url)
 
         debug(s"[DEBUG] stubs user create/update action after list details = [$url]")
-        debug(s"[DEBUG] full stubs user create/update URL after list details = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Post Stubs User Create Page After List Details URL", fullUrl)
       })
       .disableFollowRedirect
       .formParam("csrfToken", "#{csrfToken}")
@@ -1258,10 +1310,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Stubs User Edit Page After Create")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("stubsUserEditPageAfterCreateUrl").as[String])
-
-        debug(s"[DEBUG] stubs edit page after create URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Stubs User Edit Page After Create URL", fullUrl)
       })
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("csrfToken"))
@@ -1295,9 +1344,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
         val fullUrl = normalizeSignInLocation(url)
 
         debug(s"[DEBUG] stubs user update action after create = [$url]")
-        debug(s"[DEBUG] full stubs user update URL after create = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Post Stubs User Update Page After Create URL", fullUrl)
       })
       .disableFollowRedirect
       .formParam("csrfToken", "#{csrfToken}")
@@ -1346,9 +1393,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
         val fullUrl = normalizeSignInLocation(url)
 
         debug(s"[DEBUG] matchApplicationUrlFromContinue = [$url]")
-        debug(s"[DEBUG] actual match application GET URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Match Application Page URL", fullUrl)
       })
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("matchApplicationCsrfToken"))
@@ -1362,9 +1407,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           extractContinueUrl(rawUrl).getOrElse(normalizeSignInLocation(rawUrl))
 
         debug(s"[DEBUG] raw matchApplicationUrlFromContinue for POST = [$rawUrl]")
-        debug(s"[DEBUG] actual match application POST URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Post Confirm Match To Individual Provided Details Yes URL", fullUrl)
       })
       .disableFollowRedirect
       .formParam("csrfToken", "#{matchApplicationCsrfToken}")
@@ -1373,7 +1416,11 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .check(status.is(303))
       .check(
         header("Location")
-          .transform(normalizeToFrontend)
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Confirm Match To Individual Provided Details Yes = [$fullLocation]")
+            fullLocation
+          }
           .saveAs("provideDetailsCheckYourAnswersUrl")
       )
 
@@ -1381,10 +1428,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Provide Details Check Your Answers After Match")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersUrl").as[String])
-
-        debug(s"[DEBUG] provide details CYA URL after match = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Provide Details Check Your Answers After Match URL", fullUrl)
       })
       .disableFollowRedirect
       .check(status.is(303))
@@ -1404,10 +1448,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Individual SA UTR Page")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("individualSaUtrPageUrl").as[String])
-
-        debug(s"[DEBUG] actual individual SA UTR page URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Individual SA UTR Page URL", fullUrl)
       })
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("individualSaUtrCsrfToken"))
@@ -1419,8 +1460,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Post Individual SA UTR Yes")
       .post(session => {
         val fullUrl = normalizeSignInLocation(session("individualSaUtrFormAction").as[String])
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Post Individual SA UTR Yes URL", fullUrl)
       })
       .disableFollowRedirect
       .formParam("csrfToken", "#{individualSaUtrCsrfToken}")
@@ -1430,7 +1470,11 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .check(status.is(303))
       .check(
         header("Location")
-          .transform(normalizeToFrontend)
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Individual SA UTR Yes = [$fullLocation]")
+            fullLocation
+          }
           .saveAs("provideDetailsCheckYourAnswersAfterUtrUrl")
       )
 
@@ -1438,10 +1482,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Provide Details Check Your Answers After UTR")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterUtrUrl").as[String])
-
-        debug(s"[DEBUG] provide details CYA URL after UTR = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Provide Details Check Your Answers After UTR URL", fullUrl)
       })
       .disableFollowRedirect
       .check(status.is(303))
@@ -1461,10 +1502,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Unified Customer Registry Identifiers")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("ucrIdentifiersUrl").as[String])
-
-        debug(s"[DEBUG] UCR identifiers URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Unified Customer Registry Identifiers URL", fullUrl)
       })
       .disableFollowRedirect
       .check(status.is(303))
@@ -1484,10 +1522,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Provide Details Check Your Answers After UCR")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterUcrUrl").as[String])
-
-        debug(s"[DEBUG] provide details CYA URL after UCR = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Provide Details Check Your Answers After UCR URL", fullUrl)
       })
       .disableFollowRedirect
       .check(status.is(303))
@@ -1507,10 +1542,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Confirmation Page")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("confirmationPageUrl").as[String])
-
-        debug(s"[DEBUG] confirmation page URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Confirmation Page URL", fullUrl)
       })
       .check(status.is(200))
       .check(
@@ -1529,8 +1561,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Sign Back Into Application")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("signBackIntoApplicationUrl").as[String])
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Sign Back Into Application URL", fullUrl)
       })
       .check(status.in(303, 200))
       .check(header("Location").saveAs("basGatewaySignInUrl"))
@@ -1539,10 +1570,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get BAS Gateway Sign In Page")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("basGatewaySignInUrl").as[String])
-
-        debug(s"[DEBUG] BAS Gateway sign-in URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get BAS Gateway Sign In Page URL", fullUrl)
       })
       .disableFollowRedirect
       .check(status.in(200, 303))
@@ -1559,9 +1587,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .map(normalizeSignInLocation)
           .getOrElse(normalizeSignInLocation(session("basGatewaySignInUrl").as[String]))
 
-        debug(s"[DEBUG] following BAS Gateway sign-in redirect to = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Follow BAS Gateway Sign In Redirect URL", fullUrl)
       })
       .disableFollowRedirect
       .check(status.is(303))
@@ -1581,10 +1607,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Final BAS Gateway Sign In Page")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("finalBasGatewaySignInPageUrl").as[String])
-
-        debug(s"[DEBUG] final BAS Gateway sign-in page URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Final BAS Gateway Sign In Page URL", fullUrl)
       })
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").optional.saveAs("basGatewayCsrfToken"))
@@ -1596,8 +1619,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Post BAS Gateway Sign In")
       .post(session => {
         val fullUrl = normalizeSignInLocation(session("basGatewaySignInFormAction").as[String])
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Post BAS Gateway Sign In URL", fullUrl)
       })
       .formParam("csrfToken", "#{basGatewayCsrfToken}")
       .formParam("userId", "#{userId}")
@@ -1605,7 +1627,11 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .check(status.is(303))
       .check(
         header("Location")
-          .transform(normalizeToFrontend)
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post BAS Gateway Sign In = [$fullLocation]")
+            fullLocation
+          }
           .saveAs("taskListUrlAfterFinalSignIn")
       )
 
@@ -1613,10 +1639,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Task List After Final Sign In")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("taskListUrlAfterFinalSignIn").as[String])
-
-        debug(s"[DEBUG] task list URL after final sign-in = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Task List After Final Sign In URL", fullUrl)
       })
       .check(status.is(200))
 
@@ -1626,7 +1649,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getAgentDeclarationPage: HttpRequestBuilder =
     http("Get Agent Declaration Page")
-      .get(s"$baseUrl$route/agent-declaration/confirm-declaration")
+      .get(_ => debugUrl("Get Agent Declaration Page URL", s"$baseUrl$route/agent-declaration/confirm-declaration"))
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("agentDeclarationCsrfToken"))
       .check(
@@ -1642,10 +1665,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Post Agent Declaration Accept And Send")
       .post(session => {
         val fullUrl = normalizeSignInLocation(session("agentDeclarationFormAction").as[String])
-
-        debug(s"[DEBUG] agent declaration POST URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Post Agent Declaration Accept And Send URL", fullUrl)
       })
       .disableFollowRedirect
       .formParam("csrfToken", "#{agentDeclarationCsrfToken}")
@@ -1653,7 +1673,11 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .check(status.is(303))
       .check(
         header("Location")
-          .transform(normalizeToFrontend)
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Agent Declaration Accept And Send = [$fullLocation]")
+            fullLocation
+          }
           .saveAs("applicationStatusUrl")
       )
 
@@ -1661,10 +1685,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
     http("Get Application Status Page")
       .get(session => {
         val fullUrl = normalizeSignInLocation(session("applicationStatusUrl").as[String])
-
-        debug(s"[DEBUG] application status URL = [$fullUrl]")
-
-        io.gatling.commons.validation.Success(fullUrl)
+        debugUrl("Get Application Status Page URL", fullUrl)
       })
       .check(status.is(200))
       .check(substring("You’ve applied for an agent services account"))
