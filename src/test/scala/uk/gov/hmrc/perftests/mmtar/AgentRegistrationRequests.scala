@@ -428,6 +428,44 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       .check(bodyString.transform(extractApplicantDetailsTaskLink).saveAs("applicantDetailsEntryUrl"))
       .check(bodyString.transform(extractAgentDetailsTaskLink).optional.saveAs("agentDetailsEntryUrl"))
 
+  // Follow redirects after first task-list load so organisation UCR updates are persisted
+  // before downstream steps (declaration expects the org UCR result fields to exist, even when empty).
+  val continueTaskListAfterGrsRedirect1: HttpRequestBuilder =
+    http("Follow Task List Initial Redirect After GRS 1")
+      .get(session => {
+        val fullUrl = session("taskListInitialRedirectUrl").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Initial Redirect After GRS 1 URL", fullUrl)
+      })
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("taskListInitialRedirectUrl2"))
+
+  val continueTaskListAfterGrsRedirect2: HttpRequestBuilder =
+    http("Follow Task List Initial Redirect After GRS 2")
+      .get(session => {
+        val fullUrl = session("taskListInitialRedirectUrl2").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Initial Redirect After GRS 2 URL", fullUrl)
+      })
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("taskListInitialRedirectUrl3"))
+
+  val continueTaskListAfterGrsRedirect3: HttpRequestBuilder =
+    http("Follow Task List Initial Redirect After GRS 3")
+      .get(session => {
+        val fullUrl = session("taskListInitialRedirectUrl3").asOption[String]
+          .orElse(session("taskListInitialRedirectUrl2").asOption[String])
+          .orElse(session("taskListInitialRedirectUrl").asOption[String])
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Initial Redirect After GRS 3 URL", fullUrl)
+      })
+      .check(status.in(200, 303))
+      .check(bodyString.transform(extractApplicantDetailsTaskLink).optional.saveAs("applicantDetailsEntryUrl"))
+      .check(bodyString.transform(extractAgentDetailsTaskLink).optional.saveAs("agentDetailsEntryUrl"))
+
   val enterApplicantDetailsFromTaskList: HttpRequestBuilder =
     http("Enter Applicant Details From Task List")
       .get(session => {
@@ -1540,29 +1578,38 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
   val getConfirmationPage: HttpRequestBuilder =
     http("Get Confirmation Page")
-      .get(session => {
+      .get { session =>
         val fullUrl = normalizeSignInLocation(session("confirmationPageUrl").as[String])
         debugUrl("Get Confirmation Page URL", fullUrl)
-      })
+        fullUrl
+      }
       .check(status.is(200))
       .check(
-        bodyString.transform { body =>
-          val signBackInLinkRegex =
-            """<a[^>]*href="([^"]+)"[^>]*>\s*Sign back into your application\s*</a>""".r
-
-          signBackInLinkRegex.findFirstMatchIn(body) match {
-            case Some(m) => m.group(1).replace("&amp;", "&")
-            case None    => ""
-          }
-        }.saveAs("signBackIntoApplicationUrl")
+        regex("""<a[^>]*href="([^"]*sign-out-with-continue[^"]*)"[^>]*>""")
+          .transform(_.replace("&amp;", "&"))
+          .saveAs("signBackIntoApplicationUrl")
       )
+
+//  val getSignBackIntoApplication: HttpRequestBuilder =
+//    http("Get Sign Back Into Application")
+//      .get(session => {
+//        val fullUrl = normalizeSignInLocation(session("signBackIntoApplicationUrl").as[String])
+//        debugUrl("Get Sign Back Into Application URL", fullUrl)
+//      })
+//      .check(status.in(303, 200))
+//      .check(header("Location").saveAs("basGatewaySignInUrl"))
 
   val getSignBackIntoApplication: HttpRequestBuilder =
     http("Get Sign Back Into Application")
-      .get(session => {
-        val fullUrl = normalizeSignInLocation(session("signBackIntoApplicationUrl").as[String])
-        debugUrl("Get Sign Back Into Application URL", fullUrl)
-      })
+      .get { session =>
+        val rawUrl = session("signBackIntoApplicationUrl").as[String]
+        val fullUrl = normalizeSignInLocation(rawUrl)
+
+        debugUrl("Raw Sign Back Into Application URL", rawUrl)
+        debugUrl("Normalised Sign Back Into Application URL", fullUrl)
+
+        fullUrl
+      }
       .check(status.in(303, 200))
       .check(header("Location").saveAs("basGatewaySignInUrl"))
 

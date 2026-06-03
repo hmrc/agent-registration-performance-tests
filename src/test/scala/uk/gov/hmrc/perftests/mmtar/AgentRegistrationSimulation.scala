@@ -51,7 +51,10 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getGrsTestDataPage,
     getGrsFormIfNeeded,
     postGrsTestDataPage,
-    getTaskListPage
+    getTaskListPage,
+    continueTaskListAfterGrsRedirect1,
+    continueTaskListAfterGrsRedirect2,
+    continueTaskListAfterGrsRedirect3
   )
 
   setup("continue-to-sign-in", "Continue To Sign In") withRequests (
@@ -79,7 +82,10 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getGrsTestDataPage,
     getGrsFormIfNeeded,
     postGrsTestDataPage,
-    getTaskListPage
+    getTaskListPage,
+    continueTaskListAfterGrsRedirect1,
+    continueTaskListAfterGrsRedirect2,
+    continueTaskListAfterGrsRedirect3
   )
 
    setup("applicant-contact-details", "Applicant Contact Details") withRequests (
