@@ -169,13 +169,41 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     getConfirmationPage
   )
 
+  setup("provide-details-concurrency", "Provide Details Concurrency") withRequests (
+    getSignInPageAfterListDetails,
+    getGgSignInPageAfterListDetails,
+    postSignInWithSeededIndividualUser,
+    getMatchApplicationPageForConcurrency,
+    postConfirmMatchToIndividualProvidedDetailsYes,
+    getProvideDetailsCheckYourAnswersAfterMatchForConcurrency,
+    getIndividualTelephoneNumberPage,
+    postIndividualTelephoneNumber,
+    getProvideDetailsCheckYourAnswersAfterTelephoneNumber,
+    getIndividualEmailAddressPage,
+    postIndividualEmailAddress,
+    getIndividualVerifyEmailAddressPage,
+    getProvideDetailsCheckYourAnswersAfterEmailVerification,
+    getIndividualSaUtrPage,
+    postIndividualSaUtrYes,
+    getProvideDetailsCheckYourAnswersAfterUtrForConcurrency,
+    getUnifiedCustomerRegistryIdentifiersForConcurrency,
+    getProvideDetailsCheckYourAnswersAfterUcrForConcurrency,
+    getApproveApplicantPage,
+    postApproveApplicant,
+    getAgreeAgentStandardsPage,
+    postAgreeAgentStandards,
+    getProvideDetailsFinalCheckYourAnswersPage,
+    postProvideDetailsFinalCheckYourAnswers,
+    getProvideDetailsConfirmationPage
+  )
+
   setup("sign-back-in-to-application", "Sign back in to application") withRequests (
     getSignBackIntoApplication,
     getBasGatewaySignInPage,
     followBasGatewaySignInRedirect,
     getFinalBasGatewaySignInPage,
     postBasGatewaySignIn,
-    getTaskListAfterFinalSignIn,
+    getTaskListAfterFinalSignIn
   )
 
   setup("sign-declaration", "Sign Declaration") withRequests (

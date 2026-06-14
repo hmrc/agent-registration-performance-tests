@@ -1256,7 +1256,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .saveAs("listDetailsGgSignInAction")
       )
       .check(
-        bodyString.transform(_ => s"perf-${UUID.randomUUID().toString.take(8)}").saveAs("individualUserId")
+        bodyString.transform(_ => "ok").exists
       )
 
   val postSignInWithIndividualUser: HttpRequestBuilder =
@@ -1271,16 +1271,67 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
               .map(normalizeSignInLocation)
               .flatMap(ggSignInUrlFromBasUrl)
               .map(io.gatling.commons.validation.Success(_))
-              .getOrElse(io.gatling.commons.validation.Failure("Unable to derive GG sign-in URL from BAS sign-in redirect"))
+              .getOrElse(
+                io.gatling.commons.validation.Failure(
+                  "Unable to derive GG sign-in URL from BAS sign-in redirect"
+                )
+              )
           }
 
         validation.flatMap(url => debugUrl("Post Sign In With Individual User URL", url))
       })
-      .formParam("userId", "#{individualUserId}")
+      .formParam("userId", session => {
+        val userId = session("individualUserId").asOption[String]
+          .filter(_.nonEmpty)
+          .getOrElse(s"perf-${UUID.randomUUID().toString.take(8)}")
+
+        io.gatling.commons.validation.Success(userId)
+      })
       .formParam("planetId", "#{planetId}")
       .formParam("csrfToken", "#{csrfToken}")
       .check(status.is(303))
-      .check(headerRegex("Location", "(.*/agents-external-stubs/user/(?:create|edit)\\?.*continue=.*)").saveAs("userEditPageUrl"))
+      .check(
+        headerRegex(
+          "Location",
+          "(.*/agents-external-stubs/user/(?:create|edit)\\?.*continue=.*)"
+        ).saveAs("userEditPageUrl")
+      )
+
+  val postSignInWithSeededIndividualUser: HttpRequestBuilder =
+    http("Post Sign In With Seeded Individual User")
+      .post(session => {
+        val validation = session("listDetailsGgSignInAction").asOption[String]
+          .filter(_.nonEmpty)
+          .map(io.gatling.commons.validation.Success(_))
+          .getOrElse {
+            session("listDetailsBasSignInUrl").asOption[String]
+              .orElse(session("signInPageUrl").asOption[String])
+              .map(normalizeSignInLocation)
+              .flatMap(ggSignInUrlFromBasUrl)
+              .map(io.gatling.commons.validation.Success(_))
+              .getOrElse(io.gatling.commons.validation.Failure("Unable to derive GG sign-in URL from BAS sign-in redirect"))
+          }
+
+        validation.flatMap(url => debugUrl("Post Sign In With Seeded Individual User URL", url))
+      })
+      .formParam("userId", session => {
+        val userId = session("individualUserId").asOption[String]
+          .filter(_.nonEmpty)
+          .getOrElse(s"perf-${UUID.randomUUID().toString.take(8)}")
+        io.gatling.commons.validation.Success(userId)
+      })
+      .formParam("planetId", "#{planetId}")
+      .formParam("csrfToken", "#{csrfToken}")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Sign In With Seeded Individual User = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("matchApplicationUrlFromContinue")
+      )
 
   // --------------------------------------------------
   // Prove identity
@@ -1432,9 +1483,58 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
         debug(s"[DEBUG] matchApplicationUrlFromContinue = [$url]")
         debugUrl("Get Match Application Page URL", fullUrl)
+
+        fullUrl
       })
+      .disableFollowRedirect
+      .check(status.in(200, 303))
+      .check(
+        header("Location")
+          .transform(normalizeToFrontend)
+          .optional
+          .saveAs("matchApplicationUnexpectedRedirect")
+      )
+      .check(
+        css("input[name=csrfToken]", "value")
+          .optional
+          .saveAs("matchApplicationCsrfToken")
+      )
+
+  val getMatchApplicationPageForConcurrency: HttpRequestBuilder =
+    http("Get Match Application Page For Concurrency")
+      .get(session => {
+        val url     = session("matchApplicationUrlFromContinue").as[String]
+        val fullUrl = normalizeSignInLocation(url)
+
+        debug(s"[DEBUG] matchApplicationUrlFromContinue for concurrency = [$url]")
+        debugUrl("Get Match Application Page For Concurrency URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
       .check(status.is(200))
       .check(css("input[name=csrfToken]", "value").saveAs("matchApplicationCsrfToken"))
+
+  val getSeededMatchApplicationRedirectToCya: HttpRequestBuilder =
+    http("Get Seeded Match Application Redirect To CYA")
+      .get(session => {
+        val url     = session("matchApplicationUrlFromContinue").as[String]
+        val fullUrl = normalizeSignInLocation(url)
+
+        debug(s"[DEBUG] seeded matchApplicationUrlFromContinue = [$url]")
+        debugUrl("Get Seeded Match Application Redirect To CYA URL", fullUrl)
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after seeded match application = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("provideDetailsCheckYourAnswersUrl")
+      )
 
   val postConfirmMatchToIndividualProvidedDetailsYes: HttpRequestBuilder =
     http("Post Confirm Match To Individual Provided Details Yes")
@@ -1477,6 +1577,180 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
 
             debug(s"[DEBUG] Location from provide details CYA = [$fullLocation]")
 
+            fullLocation
+          }
+          .saveAs("individualSaUtrPageUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterMatchForConcurrency: HttpRequestBuilder =
+    http("Get Provide Details CYA After Match For Concurrency")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersUrl").as[String])
+        debugUrl("Get Provide Details CYA After Match For Concurrency URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+
+            debug(s"[DEBUG] Location from provide details CYA after match for concurrency = [$fullLocation]")
+
+            fullLocation
+          }
+          .saveAs("individualTelephoneNumberPageUrl")
+      )
+
+  val getIndividualTelephoneNumberPage: HttpRequestBuilder =
+    http("Get Individual Telephone Number Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("individualTelephoneNumberPageUrl").as[String])
+        debugUrl("Get Individual Telephone Number Page URL", fullUrl)
+
+        fullUrl
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("individualTelephoneNumberCsrfToken"))
+      .check(bodyString.transform(extractFirstFormAction).saveAs("individualTelephoneNumberFormAction"))
+
+  val postIndividualTelephoneNumber: HttpRequestBuilder =
+    http("Post Individual Telephone Number")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("individualTelephoneNumberFormAction").as[String])
+        debugUrl("Post Individual Telephone Number URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{individualTelephoneNumberCsrfToken}")
+      .formParam("individualTelephoneNumber", "07777777777")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Individual Telephone Number = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("provideDetailsCheckYourAnswersAfterTelephoneNumberUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterTelephoneNumber: HttpRequestBuilder =
+    http("Get Provide Details CYA After Telephone Number")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterTelephoneNumberUrl").as[String])
+        debugUrl("Get Provide Details CYA After Telephone Number URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location from provide details CYA after telephone number = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("individualEmailAddressPageUrl")
+      )
+
+  val getIndividualEmailAddressPage: HttpRequestBuilder =
+    http("Get Individual Email Address Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("individualEmailAddressPageUrl").as[String])
+        debugUrl("Get Individual Email Address Page URL", fullUrl)
+
+        fullUrl
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("individualEmailAddressCsrfToken"))
+      .check(bodyString.transform(extractFirstFormAction).saveAs("individualEmailAddressFormAction"))
+
+  val postIndividualEmailAddress: HttpRequestBuilder =
+    http("Post Individual Email Address")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("individualEmailAddressFormAction").as[String])
+        debugUrl("Post Individual Email Address URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{individualEmailAddressCsrfToken}")
+      .formParam("individualEmailAddress", session => s"perf-${session.userId}@example.com")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Individual Email Address = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("individualVerifyEmailAddressPageUrl")
+      )
+
+  val getIndividualVerifyEmailAddressPage: HttpRequestBuilder =
+    http("Get Individual Verify Email Address Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("individualVerifyEmailAddressPageUrl").as[String])
+        debugUrl("Get Individual Verify Email Address Page URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Get Individual Verify Email Address Page = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("provideDetailsCheckYourAnswersAfterEmailVerificationUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterEmailVerification: HttpRequestBuilder =
+    http("Get Provide Details CYA After Email Verification")
+      .get(session => {
+        val fullUrl =
+          normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterEmailVerificationUrl").as[String])
+
+        debugUrl("Get Provide Details CYA After Email Verification URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location from provide details CYA after email verification = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("individualSaUtrPageUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterEmailAddress: HttpRequestBuilder =
+    http("Get Provide Details CYA After Email Address")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterEmailAddressUrl").as[String])
+        debugUrl("Get Provide Details CYA After Email Address URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location from provide details CYA after email address = [$fullLocation]")
             fullLocation
           }
           .saveAs("individualSaUtrPageUrl")
@@ -1536,6 +1810,205 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .saveAs("ucrIdentifiersUrl")
       )
 
+  val getProvideDetailsCheckYourAnswersAfterUtrForConcurrency: HttpRequestBuilder =
+    http("Get Provide Details CYA After UTR For Concurrency")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterUtrUrl").as[String])
+        debugUrl("Get Provide Details CYA After UTR For Concurrency URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location from provide details CYA after UTR for concurrency = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("unifiedCustomerRegistryIdentifiersUrlForConcurrency")
+      )
+
+  val getUnifiedCustomerRegistryIdentifiersForConcurrency: HttpRequestBuilder =
+    http("Get Unified Customer Registry Identifiers For Concurrency")
+      .get(session => {
+        val fullUrl =
+          normalizeSignInLocation(session("unifiedCustomerRegistryIdentifiersUrlForConcurrency").as[String])
+
+        debugUrl("Get Unified Customer Registry Identifiers For Concurrency URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after UCR for concurrency = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("provideDetailsCheckYourAnswersAfterUcrUrlForConcurrency")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterUcrForConcurrency: HttpRequestBuilder =
+    http("Get Provide Details CYA After UCR For Concurrency")
+      .get(session => {
+        val fullUrl =
+          normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterUcrUrlForConcurrency").as[String])
+
+        debugUrl("Get Provide Details CYA After UCR For Concurrency URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location from provide details CYA after UCR for concurrency = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("approveApplicantPageUrl")
+      )
+
+  val getApproveApplicantPage: HttpRequestBuilder =
+    http("Get Approve Applicant Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("approveApplicantPageUrl").as[String])
+        debugUrl("Get Approve Applicant Page URL", fullUrl)
+
+        fullUrl
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("approveApplicantCsrfToken"))
+      .check(bodyString.transform(extractFirstFormAction).saveAs("approveApplicantFormAction"))
+
+  val postApproveApplicant: HttpRequestBuilder =
+    http("Post Approve Applicant")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("approveApplicantFormAction").as[String])
+        debugUrl("Post Approve Applicant URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{approveApplicantCsrfToken}")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Approve Applicant = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("agreeAgentStandardsPageUrl")
+      )
+
+  val getProvideDetailsCheckYourAnswersAfterApproveApplicant: HttpRequestBuilder =
+    http("Get Provide Details CYA After Approve Applicant")
+      .get(session => {
+        val fullUrl =
+          normalizeSignInLocation(session("provideDetailsCheckYourAnswersAfterApproveApplicantUrl").as[String])
+
+        debugUrl("Get Provide Details CYA After Approve Applicant URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location from CYA after approve applicant = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("agreeAgentStandardsPageUrl")
+      )
+
+  val getAgreeAgentStandardsPage: HttpRequestBuilder =
+    http("Get Agree Agent Standards Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("agreeAgentStandardsPageUrl").as[String])
+        debugUrl("Get Agree Agent Standards Page URL", fullUrl)
+
+        fullUrl
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("agreeAgentStandardsCsrfToken"))
+      .check(bodyString.transform(extractFirstFormAction).saveAs("agreeAgentStandardsFormAction"))
+
+  val postAgreeAgentStandards: HttpRequestBuilder =
+    http("Post Agree Agent Standards")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("agreeAgentStandardsFormAction").as[String])
+        debugUrl("Post Agree Agent Standards URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{agreeAgentStandardsCsrfToken}")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Agree Agent Standards = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("provideDetailsFinalCheckYourAnswersPageUrl")
+      )
+
+  val getProvideDetailsFinalCheckYourAnswersPage: HttpRequestBuilder =
+    http("Get Provide Details Final Check Your Answers Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsFinalCheckYourAnswersPageUrl").as[String])
+        debugUrl("Get Provide Details Final Check Your Answers Page URL", fullUrl)
+
+        fullUrl
+      })
+      .check(status.is(200))
+      .check(css("input[name=csrfToken]", "value").saveAs("provideDetailsFinalCyaCsrfToken"))
+      .check(bodyString.transform(extractFirstFormAction).saveAs("provideDetailsFinalCyaFormAction"))
+
+  val postProvideDetailsFinalCheckYourAnswers: HttpRequestBuilder =
+    http("Post Provide Details Final Check Your Answers")
+      .post(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsFinalCyaFormAction").as[String])
+        debugUrl("Post Provide Details Final Check Your Answers URL", fullUrl)
+
+        fullUrl
+      })
+      .disableFollowRedirect
+      .formParam("csrfToken", "#{provideDetailsFinalCyaCsrfToken}")
+      .formParam("submit", "SaveAndContinue")
+      .check(status.is(303))
+      .check(
+        header("Location")
+          .transform { loc =>
+            val fullLocation = normalizeToFrontend(loc)
+            debug(s"[DEBUG] Location after Post Provide Details Final CYA = [$fullLocation]")
+            fullLocation
+          }
+          .saveAs("provideDetailsConfirmationPageUrl")
+      )
+
+  val getProvideDetailsConfirmationPage: HttpRequestBuilder =
+    http("Get Provide Details Confirmation Page")
+      .get(session => {
+        val fullUrl = normalizeSignInLocation(session("provideDetailsConfirmationPageUrl").as[String])
+        debugUrl("Get Provide Details Confirmation Page URL", fullUrl)
+
+        fullUrl
+      })
+      .check(status.is(200))
+      .check(substring("You have finished this process").exists)
+
   val getUnifiedCustomerRegistryIdentifiers: HttpRequestBuilder =
     http("Get Unified Customer Registry Identifiers")
       .get(session => {
@@ -1585,8 +2058,12 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
       }
       .check(status.is(200))
       .check(
+        // Sole-trader confirmation page has a sign-out-with-continue link back to the
+        // task list; LLP individual confirmation page does not. Make this optional so
+        // the check does not fail for LLP individuals in the concurrency journey.
         regex("""<a[^>]*href="([^"]*sign-out-with-continue[^"]*)"[^>]*>""")
           .transform(_.replace("&amp;", "&"))
+          .optional
           .saveAs("signBackIntoApplicationUrl")
       )
 
