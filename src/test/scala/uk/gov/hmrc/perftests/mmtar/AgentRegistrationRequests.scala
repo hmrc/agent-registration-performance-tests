@@ -732,12 +732,60 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .getOrElse(s"$baseUrl$route/task-list")
         debugUrl("Follow Task List Redirect 3 And Extract Agent Details URL", fullUrl)
       })
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("taskListRedirect4"))
+      .check(
+        bodyString.transform { body =>
+          try {
+            java.nio.file.Files.createDirectories(java.nio.file.Paths.get("target/debug"))
+            java.nio.file.Files.write(java.nio.file.Paths.get("target/debug/task-list-after-applicant-cya-redirect-3.html"), body.getBytes("UTF-8"))
+          } catch { case _: Exception => }
+          body
+        }.exists
+      )
+      .check(bodyString.transform(extractAgentDetailsTaskLink).optional.saveAs("agentDetailsEntryUrl"))
+
+  val followTaskListRedirect4AndExtractAgentDetails: HttpRequestBuilder =
+    http("Follow Task List Redirect 4 And Extract Agent Details")
+      .get(session => {
+        val fullUrl = session("taskListRedirect4").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect 4 And Extract Agent Details URL", fullUrl)
+      })
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("taskListRedirect5"))
+      .check(
+        bodyString.transform { body =>
+          try {
+            java.nio.file.Files.createDirectories(java.nio.file.Paths.get("target/debug"))
+            java.nio.file.Files.write(
+              java.nio.file.Paths.get("target/debug/task-list-after-applicant-cya-redirect-4.html"),
+              body.getBytes("UTF-8")
+            )
+          } catch { case _: Exception => }
+          body
+        }.exists
+      )
+      .check(bodyString.transform(extractAgentDetailsTaskLink).optional.saveAs("agentDetailsEntryUrl"))
+
+  val followTaskListRedirect5AndExtractAgentDetails: HttpRequestBuilder =
+    http("Follow Task List Redirect 5 And Extract Agent Details")
+      .get(session => {
+        val fullUrl = session("taskListRedirect5").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect 5 And Extract Agent Details URL", fullUrl)
+      })
       .check(status.is(200))
       .check(
         bodyString.transform { body =>
           try {
             java.nio.file.Files.createDirectories(java.nio.file.Paths.get("target/debug"))
-            java.nio.file.Files.write(java.nio.file.Paths.get("target/debug/task-list-after-applicant-cya-final.html"), body.getBytes("UTF-8"))
+            java.nio.file.Files.write(
+              java.nio.file.Paths.get("target/debug/task-list-after-applicant-cya-final.html"),
+              body.getBytes("UTF-8")
+            )
           } catch { case _: Exception => }
           body
         }.exists
@@ -995,12 +1043,58 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
           .getOrElse(s"$baseUrl$route/task-list")
         debugUrl("Follow Task List Redirect After Agent CYA 3 URL", fullUrl)
       })
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("agentTaskListRedirect4"))
+      .check(
+        bodyString.transform { body =>
+          try {
+            java.nio.file.Files.createDirectories(java.nio.file.Paths.get("target/debug"))
+            java.nio.file.Files.write(java.nio.file.Paths.get("target/debug/task-list-after-agent-cya-redirect-3.html"), body.getBytes("UTF-8"))
+          } catch { case _: Exception => }
+          body
+        }.exists
+      )
+
+  val followTaskListRedirectAfterAgentCya4: HttpRequestBuilder =
+    http("Follow Task List Redirect After Agent CYA 4")
+      .get(session => {
+        val fullUrl = session("agentTaskListRedirect4").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent CYA 4 URL", fullUrl)
+      })
+      .check(status.in(200, 303))
+      .check(header("Location").optional.saveAs("agentTaskListRedirect5"))
+      .check(
+        bodyString.transform { body =>
+          try {
+            java.nio.file.Files.createDirectories(java.nio.file.Paths.get("target/debug"))
+            java.nio.file.Files.write(
+              java.nio.file.Paths.get("target/debug/task-list-after-agent-cya-redirect-4.html"),
+              body.getBytes("UTF-8")
+            )
+          } catch { case _: Exception => }
+          body
+        }.exists
+      )
+
+  val followTaskListRedirectAfterAgentCya5: HttpRequestBuilder =
+    http("Follow Task List Redirect After Agent CYA 5")
+      .get(session => {
+        val fullUrl = session("agentTaskListRedirect5").asOption[String]
+          .map(frontendUrl)
+          .getOrElse(s"$baseUrl$route/task-list")
+        debugUrl("Follow Task List Redirect After Agent CYA 5 URL", fullUrl)
+      })
       .check(status.is(200))
       .check(
         bodyString.transform { body =>
           try {
             java.nio.file.Files.createDirectories(java.nio.file.Paths.get("target/debug"))
-            java.nio.file.Files.write(java.nio.file.Paths.get("target/debug/task-list-after-agent-cya-final.html"), body.getBytes("UTF-8"))
+            java.nio.file.Files.write(
+              java.nio.file.Paths.get("target/debug/task-list-after-agent-cya-final.html"),
+              body.getBytes("UTF-8")
+            )
           } catch { case _: Exception => }
           body
         }.exists

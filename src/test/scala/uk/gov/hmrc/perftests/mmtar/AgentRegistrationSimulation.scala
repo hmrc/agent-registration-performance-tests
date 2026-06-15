@@ -103,7 +103,9 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
      goToTaskListFromApplicantCya,
      followTaskListRedirect1,
      followTaskListRedirect2AndExtractAgentDetails,
-     followTaskListRedirect3AndExtractAgentDetails
+     followTaskListRedirect3AndExtractAgentDetails,
+     followTaskListRedirect4AndExtractAgentDetails,
+     followTaskListRedirect5AndExtractAgentDetails
    )
 
   setup("agent-account-details", "Agent Account Details") withRequests (
@@ -121,7 +123,9 @@ class AgentRegistrationSimulation extends PerformanceTestRunner {
     goToTaskListFromAgentCya,
     followTaskListRedirectAfterAgentCya1,
     followTaskListRedirectAfterAgentCya2,
-    followTaskListRedirectAfterAgentCya3
+    followTaskListRedirectAfterAgentCya3,
+    followTaskListRedirectAfterAgentCya4,
+    followTaskListRedirectAfterAgentCya5
   )
 
   setup("amls-details", "AMLS Details") withRequests (
