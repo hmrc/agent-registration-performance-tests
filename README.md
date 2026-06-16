@@ -162,7 +162,7 @@ uk.gov.hmrc.perftests.mmtar.AgentRegistrationProvideDetailsContentionSimulation
 Run the standard sole trader simulation with the configured 10-minute profile:
 
 ```bash
-cd /Users/markbennett/workspace/agent-registration-performance-tests
+cd /path/to/git/folder/agent-registration-performance-tests
 
 sbt -DdebugRequests=false \
     -DrunLocal=true \
@@ -186,7 +186,7 @@ The standard 10-minute profile is:
 Seed one pre-created application with six listed individuals:
 
 ```bash
-cd /Users/markbennett/workspace/agent-registration-performance-tests
+cd /path/to/git/folder/agent-registration-performance-tests
 
 BACKEND_URL=http://localhost:22202 \
 FRONTEND_URL=http://localhost:22201 \
@@ -232,7 +232,7 @@ To run both simulations locally, run the sole trader simulation first, then the 
 Seed the provide-details data before running the contention simulation:
 
 ```bash
-cd /Users/markbennett/workspace/agent-registration-performance-tests
+cd /path/to/git/folder/agent-registration-performance-tests
 
 BACKEND_URL=http://localhost:22202 \
 FRONTEND_URL=http://localhost:22201 \
