@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-BACKEND_URL="${BACKEND_URL:-https://agent-registration.public.mdtp}"
+BACKEND_URL="${BACKEND_URL:-https://agent-registration.protected.mdtp}"
 FRONTEND_URL="${FRONTEND_URL:-https://agent-registration-frontend.public.mdtp}"
 STUBS_URL="${STUBS_URL:-https://www.staging.tax.service.gov.uk}"
 RESET_URL="${RESET_URL:-${FRONTEND_URL}/agent-registration/test-only/reset}"
