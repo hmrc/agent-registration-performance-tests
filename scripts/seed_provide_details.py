@@ -1,0 +1,513 @@
+#!/usr/bin/env python3
+"""
+Seed script for the targeted provide-details contention simulation.
+
+IMPORTANT: This script uses the agent-registration test-only HTTP API endpoints,
+NOT direct MongoDB inserts. Direct Mongo inserts will NOT work because both the
+'agent-application' and 'individual' collections store field-level encrypted data.
+The only way to write valid records is through the service, which handles encryption
+transparently.
+
+Required services:
+  - agent-registration running with testOnlyDoNotUseInAppConf.Routes
+  - agents-external-stubs for BAS gateway sign-in URL construction
+  - agent-registration-frontend for provide-details routes and optional frontend fast-forward seeding
+
+What this script creates:
+  - N AgentApplicationLlp records in the 'agent-application' collection
+  - six IndividualProvidedDetails records per application for the default contention scenario
+  - one CSV row per individual sign-in slot, written to the feeder CSV file
+
+The generated feeder is used by:
+
+  uk.gov.hmrc.perftests.mmtar.AgentRegistrationProvideDetailsContentionSimulation
+
+The contention simulation is separate from the rate-based journeys in journeys.conf.
+It starts six users at once against the same pre-seeded application.
+
+Recommended usage:
+
+  # Local targeted contention seed:
+  python3 scripts/seed_provide_details.py \
+    --backend-url  http://localhost:22202 \
+    --frontend-url http://localhost:22201 \
+    --stubs-url    http://localhost:9099 \
+    --apps 1 \
+    --individuals 6
+
+  # Jenkins/staging seed with a small safety buffer:
+  python3 scripts/seed_provide_details.py \
+    --apps 5 \
+    --individuals 6
+
+  # Custom output path:
+  python3 scripts/seed_provide_details.py \
+    --apps 1 \
+    --individuals 6 \
+    --output src/test/resources/data/provide-details-concurrency.csv
+
+  # Dry run:
+  python3 scripts/seed_provide_details.py --dry-run
+
+Notes:
+  - One application with six individuals is enough for one contention run.
+  - Five applications gives a small buffer for Jenkins.
+  - Do not use the old sustained 6 JPS seed calculation for the targeted contention simulation.
+  - Do not reset shared staging data unless deliberately agreed with the team.
+"""
+
+import csv
+import sys
+import time
+import uuid
+import argparse
+import re
+from html import unescape
+from urllib.parse import quote
+
+
+def camel_to_hyphenated(s: str) -> str:
+    """
+    Mirror of HyphenTool.camelCaseToHyphenated in the frontend:
+      input.replaceAll("([A-Z])", "-$1").toLowerCase.stripPrefix("-")
+    e.g. LlpPartnersAndOtherRelevantTaxAdvisers6 -> llp-partners-and-other-relevant-tax-advisers6
+    """
+    return re.sub(r'([A-Z])', r'-\1', s).lower().lstrip('-')
+
+try:
+    import requests
+except ImportError:
+    print("ERROR: 'requests' library is required. Install it with: pip install requests", file=sys.stderr)
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Seed agent-registration and individual data for the provide-details concurrency perf test",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
+    parser.add_argument(
+        "--backend-url",
+        default="http://localhost:22202",
+        help="Base URL for agent-registration backend service (default: http://localhost:22202)"
+    )
+    parser.add_argument(
+        "--frontend-url",
+        default="http://localhost:22201",
+        help="Base URL for agent-registration-frontend service (default: http://localhost:22201)"
+    )
+    parser.add_argument(
+        "--stubs-url",
+        default="http://localhost:9099",
+        help="Base URL for agents-external-stubs / BAS gateway (default: http://localhost:9099)"
+    )
+    parser.add_argument(
+        "--apps",
+        type=int,
+        default=50,
+        help="Number of applications to create (default: 50)"
+    )
+    parser.add_argument(
+        "--individuals",
+        type=int,
+        default=20,
+        help="Number of individuals per application (default: 20)"
+    )
+    parser.add_argument(
+        "--application-seed-mode",
+        choices=["submitted-helper", "upsert-llp-explicit-officers", "frontend-fast-forward"],
+        default="submitted-helper",
+        help=(
+            "How to create applications. "
+            "'submitted-helper' uses /test-only/create-submitted-application (default). "
+            "'upsert-llp-explicit-officers' creates the application via helper then upserts it via "
+            "/test-only/application with an explicit LLP numberOfIndividuals payload. "
+            "'frontend-fast-forward' uses frontend /test-only/fast-forward-to and reuses the exact "
+            "individual userId/planetId generated by the test-only flow."
+        )
+    )
+    parser.add_argument(
+        "--fast-forward-section",
+        default="LlpPartnersAndOtherRelevantTaxAdvisers6",
+        help=(
+            "CompletedSection value used when --application-seed-mode=frontend-fast-forward "
+            "(default: LlpPartnersAndOtherRelevantTaxAdvisers6)"
+        )
+    )
+    parser.add_argument(
+        "--output",
+        default="src/test/resources/data/provide-details-concurrency.csv",
+        help="Output CSV file path (default: src/test/resources/data/provide-details-concurrency.csv)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be done without making any API calls"
+    )
+    return parser.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# API helpers
+# ---------------------------------------------------------------------------
+
+def create_application(backend_url: str) -> tuple[str, str]:
+    """
+    Create a test LLP application and return (linkId, agentApplicationId).
+
+    Calls GET /agent-registration/test-only/create-submitted-application which
+    creates an AgentApplicationLlp record ready for the provide-details journey
+    and returns {"linkId": "<value>"}.
+
+    Then calls GET /agent-registration/test-only/recent-applications to retrieve
+    the agentApplicationId (_id) for the created record.
+    """
+    create_url = f"{backend_url}/agent-registration/test-only/create-submitted-application"
+    resp = requests.get(create_url, timeout=10)
+    resp.raise_for_status()
+    link_id: str = resp.json()["linkId"]
+
+    # Small pause to avoid a race between create and the recent-applications query
+    time.sleep(0.3)
+
+    recent_url = f"{backend_url}/agent-registration/test-only/recent-applications"
+    recent_resp = requests.get(recent_url, timeout=10)
+    recent_resp.raise_for_status()
+    apps: list[dict] = recent_resp.json()
+
+    for app in apps:
+        if app.get("linkId") == link_id:
+            return link_id, app["_id"]
+
+    known_ids = [a.get("linkId", "<no linkId>") for a in apps[:5]]
+    raise RuntimeError(
+        f"Could not find application with linkId '{link_id}' in recent-applications.\n"
+        f"First 5 linkIds found: {known_ids}"
+    )
+
+
+def find_application_by_id(backend_url: str, app_id: str) -> dict:
+    url = f"{backend_url}/agent-registration/test-only/application/by-agent-application-id/{app_id}"
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def upsert_application(backend_url: str, payload: dict) -> None:
+    url = f"{backend_url}/agent-registration/test-only/application"
+    resp = requests.post(url, json=payload, timeout=10)
+    resp.raise_for_status()
+
+
+def build_explicit_officers_payload(individuals: int) -> dict:
+    if individuals <= 5:
+        return {
+            "type": "FiveOrLessOfficers",
+            "numberOfCompaniesHouseOfficers": individuals,
+            "isCompaniesHouseOfficersListCorrect": True
+        }
+    return {
+        "type": "SixOrMoreOfficers",
+        "numberOfCompaniesHouseOfficers": individuals,
+        "numberOfOfficersResponsibleForTaxMatters": individuals
+    }
+
+
+def create_application_via_upsert_llp_explicit_officers(backend_url: str, individuals: int) -> tuple[str, str]:
+    """
+    Create an application then upsert it via /test-only/application with explicit,
+    valid numberOfIndividuals payload for LLP.
+
+    This mode gives us deterministic NumberOfCompaniesHouseOfficers values so
+    frontend provide-details routing is exercised end-to-end with explicit state.
+    """
+    link_id, app_id = create_application(backend_url)
+
+    app_payload = find_application_by_id(backend_url, app_id)
+    if app_payload.get("type") != "AgentApplicationLlp":
+        raise RuntimeError(
+            f"Expected AgentApplicationLlp from helper route but got '{app_payload.get('type')}'."
+        )
+
+    app_payload["numberOfIndividuals"] = build_explicit_officers_payload(individuals)
+    upsert_application(backend_url, app_payload)
+    return link_id, app_id
+
+
+def create_individual(
+    backend_url: str,
+    app_id: str,
+    individual_name: str,
+    person_reference: str
+) -> None:
+    """
+    Create an IndividualProvidedDetails record for an application, ready for
+    the individual to sign in and provide their SA UTR.
+
+    Records are intentionally seeded as Precreated and do not include progressed
+    fields like hasApprovedApplication / hmrcStandardForAgentsAgreed.
+
+    The individual_name must match exactly what the Gatling simulation presents
+    at sign-in time. The simulation sets name "Test User" in
+    postStubsUserUpdatePageAfterCreate — change both if you need a different name.
+
+    createdAt is set far in the future (2059) to match the codebase test-data
+    convention, so TTL does not expire records during a run.
+    """
+    payload = {
+        "_id": str(uuid.uuid4()),
+        "personReference": person_reference,
+        "individualName": individual_name,
+        "isPersonOfControl": True,
+        "createdAt": "2059-11-25T16:33:51.880Z",
+        "providedDetailsState": "Precreated",
+        "agentApplicationId": app_id,
+    }
+
+    url = f"{backend_url}/agent-registration/test-only/individual-provided-details"
+    resp = requests.post(url, json=payload, timeout=10)
+    resp.raise_for_status()
+
+
+def build_sign_in_url(stubs_url: str, frontend_url: str, link_id: str) -> str:
+    """
+    Build the BAS gateway sign-in URL for an individual starting their
+    provide-details journey for a specific application.
+
+    The continue_url points directly to the match page expected by the
+    performance journey:
+      GET /agent-registration/provide-details/match-application/:linkId
+
+    This matches the URL that the Gatling simulation reads from the
+    'signInPageUrl' feeder column and passes to getSignInPageAfterListDetails.
+    """
+    continue_url = f"{frontend_url}/agent-registration/provide-details/match-application/{link_id}"
+    encoded_continue = quote(continue_url, safe="")
+    return (
+        f"{stubs_url}/bas-gateway/sign-in"
+        f"?continue_url={encoded_continue}"
+        f"&origin=agent-registration-frontend"
+    )
+
+
+def find_individuals_for_application(backend_url: str, app_id: str) -> list[dict]:
+    url = f"{backend_url}/agent-registration/test-only/individuals/by-agent-application-id/{app_id}"
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def unwrap_value(maybe_value: object) -> str:
+    if isinstance(maybe_value, dict):
+        nested = maybe_value.get("value")
+        if isinstance(nested, str):
+            return nested
+    if isinstance(maybe_value, str):
+        return maybe_value
+    return str(maybe_value)
+
+
+def create_application_via_frontend_fast_forward(frontend_url: str, completed_section: str) -> str:
+    """
+    Use frontend fast-forward to create one application in a realistic pre-seeded state.
+
+    Returns the AgentApplicationId extracted from redirect location:
+      /agent-registration/test-only/show-agent-application-tile/:agentApplicationId
+    """
+    section_slug = camel_to_hyphenated(completed_section)
+    ff_url = f"{frontend_url}/agent-registration/test-only/fast-forward-to/{section_slug}"
+    resp = requests.get(ff_url, timeout=20, allow_redirects=False)
+    if resp.status_code not in (302, 303):
+        raise RuntimeError(
+            f"Unexpected status from fast-forward endpoint ({resp.status_code}) at {ff_url}. "
+            "Expected 302/303 redirect to show-agent-application-tile."
+        )
+
+    location = resp.headers.get("Location", "")
+    match = re.search(r"/agent-registration/test-only/show-agent-application-tile/([^/?#]+)", location)
+    if not match:
+        raise RuntimeError(
+            f"Could not extract agentApplicationId from fast-forward redirect location: '{location}'"
+        )
+    return match.group(1)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    args = parse_args()
+
+    if args.apps <= 0:
+        print("ERROR: --apps must be greater than 0", file=sys.stderr)
+        sys.exit(1)
+    if args.individuals <= 0:
+        print("ERROR: --individuals must be greater than 0", file=sys.stderr)
+        sys.exit(1)
+
+    if args.application_seed_mode == "frontend-fast-forward":
+        total_rows = args.apps * 6
+    else:
+        total_rows = args.apps * args.individuals
+    print(f"\nProvide-details concurrency seed")
+    print(f"  Applications : {args.apps}")
+    if args.application_seed_mode == "frontend-fast-forward":
+        print("  Individuals  : 6 per application (from fast-forward preset)")
+    else:
+        print(f"  Individuals  : {args.individuals} per application")
+    print("  Seed state   : precreated")
+    print(f"  App seed mode: {args.application_seed_mode}")
+    if args.application_seed_mode == "frontend-fast-forward":
+        print(f"  FF section   : {args.fast_forward_section}")
+    print(f"  Total rows   : {total_rows} (one per individual sign-in slot)")
+    print(f"  Backend      : {args.backend_url}")
+    print(f"  Frontend     : {args.frontend_url}")
+    print(f"  Stubs        : {args.stubs_url}")
+    print(f"  Output       : {args.output}")
+
+    if args.dry_run:
+        print("\nDry run — no API calls made. Remove --dry-run to seed.")
+        return
+
+    rows: list[dict] = []
+
+    # Fail fast with a clearer message if backend is not reachable or test-only
+    # router was not enabled. Retry briefly because the service can still be
+    # warming up immediately after being started.
+    readiness_url = f"{args.backend_url}/agent-registration/test-only/recent-applications"
+    last_exc: Exception | None = None
+    for attempt in range(1, 6):
+        try:
+            sanity = requests.get(readiness_url, timeout=10)
+            sanity.raise_for_status()
+            last_exc = None
+            break
+        except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as exc:
+            last_exc = exc
+            if attempt < 5:
+                time.sleep(2)
+                continue
+        except Exception as exc:
+            last_exc = exc
+            break
+
+    if last_exc is not None:
+        if isinstance(last_exc, requests.exceptions.ConnectionError):
+            print(
+                f"\nERROR: Could not connect to backend at {args.backend_url}.\n"
+                f"For local runs the backend is usually http://localhost:22202.\n"
+                f"Ensure agent-registration is running with testOnlyDoNotUseInAppConf.Routes.",
+                file=sys.stderr
+            )
+        elif isinstance(last_exc, requests.exceptions.ReadTimeout):
+            print(
+                f"\nERROR: Timed out waiting for backend readiness at {readiness_url}.\n"
+                f"The backend may still be starting up; wait a few seconds and retry.\n"
+                f"If it keeps timing out, check that agent-registration is running with testOnlyDoNotUseInAppConf.Routes.",
+                file=sys.stderr
+            )
+        else:
+            print(
+                f"\nERROR: Backend readiness check failed: {last_exc}\n"
+                f"Check the router flag and URL: {args.backend_url}",
+                file=sys.stderr
+            )
+        sys.exit(1)
+
+    for app_num in range(1, args.apps + 1):
+        print(f"  [{app_num:>4}/{args.apps}] Creating application...", end=" ", flush=True)
+
+        try:
+            if args.application_seed_mode == "submitted-helper":
+                link_id, app_id = create_application(args.backend_url)
+                individuals_for_rows = [{"_id": str(uuid.uuid4())} for _ in range(args.individuals)]
+                for idx in range(args.individuals):
+                    create_individual(
+                        backend_url=args.backend_url,
+                        app_id=app_id,
+                        individual_name="Test User",
+                        person_reference=str(uuid.uuid4())
+                    )
+                    individuals_for_rows[idx]["_id"] = f"manual-{idx + 1}"
+            elif args.application_seed_mode == "upsert-llp-explicit-officers":
+                link_id, app_id = create_application_via_upsert_llp_explicit_officers(
+                    backend_url=args.backend_url,
+                    individuals=args.individuals
+                )
+                individuals_for_rows = [{"_id": str(uuid.uuid4())} for _ in range(args.individuals)]
+                for idx in range(args.individuals):
+                    create_individual(
+                        backend_url=args.backend_url,
+                        app_id=app_id,
+                        individual_name="Test User",
+                        person_reference=str(uuid.uuid4())
+                    )
+                    individuals_for_rows[idx]["_id"] = f"manual-{idx + 1}"
+            else:
+                app_id = create_application_via_frontend_fast_forward(
+                    frontend_url=args.frontend_url,
+                    completed_section=args.fast_forward_section
+                )
+                app_payload = find_application_by_id(args.backend_url, app_id)
+                link_id = unwrap_value(app_payload.get("linkId"))
+                if not link_id:
+                    raise RuntimeError(f"Fast-forward created app {app_id} but linkId was missing in backend payload")
+                individuals_for_rows = find_individuals_for_application(args.backend_url, app_id)
+                if not individuals_for_rows:
+                    raise RuntimeError(f"Fast-forward created app {app_id} but returned no individuals")
+        except requests.exceptions.ConnectionError:
+            print(
+                f"\nERROR: Could not connect to backend at {args.backend_url}.\n"
+                f"Ensure agent-registration is running with testOnlyDoNotUseInAppConf.Routes.",
+                file=sys.stderr
+            )
+            sys.exit(1)
+        except Exception as exc:
+            print(f"\nERROR creating application: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        sign_in_url = build_sign_in_url(args.stubs_url, args.frontend_url, link_id)
+
+        if args.application_seed_mode == "frontend-fast-forward":
+            if args.individuals != len(individuals_for_rows):
+                print(
+                    f"    NOTE: --individuals={args.individuals} ignored for frontend-fast-forward mode; "
+                    f"using {len(individuals_for_rows)} seeded individuals from {args.fast_forward_section}."
+                )
+
+        for ind_num, individual in enumerate(individuals_for_rows, start=1):
+            individual_id = unwrap_value(individual.get("_id", f"unknown-{ind_num}"))
+            user_id = f"individual_{individual_id}" if args.application_seed_mode == "frontend-fast-forward" else f"perf-{uuid.uuid4().hex[:8]}"
+            planet_id = f"MMTAR_{app_id}" if args.application_seed_mode == "frontend-fast-forward" else f"perf-{uuid.uuid4().hex[:8]}"
+            rows.append({
+                "journeyId": f"app-{app_num:04d}-individual-{ind_num:04d}",
+                "signInPageUrl": sign_in_url,
+                "planetId": planet_id,
+                "individualUserId": user_id
+            })
+
+        print(f"✓  linkId={link_id}  appId={app_id[:12]}...  ({len(individuals_for_rows)} individuals)")
+
+    # Write CSV
+    with open(args.output, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["journeyId", "signInPageUrl", "planetId", "individualUserId"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"\nDone. {len(rows)} rows written to {args.output}\n")
+    print("Next steps:")
+    print("  1. Run the targeted provide-details contention simulation:")
+    print("     sbt -DdebugRequests=false -DrunLocal=true \"gatling:testOnly uk.gov.hmrc.perftests.mmtar.AgentRegistrationProvideDetailsContentionSimulation\"")
+    print("  2. For the standard sole trader performance run:")
+    print("     sbt -DdebugRequests=false -DrunLocal=true \"gatling:testOnly uk.gov.hmrc.perftests.mmtar.AgentRegistrationSimulation\"")
+
+
+if __name__ == "__main__":
+    main()
+
