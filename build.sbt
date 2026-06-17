@@ -17,41 +17,54 @@ lazy val prepareProvideDetailsConcurrencyData =
 prepareProvideDetailsConcurrencyData := {
     val log = streams.value.log
 
-    val skipSeed = sys.props.get("skipSeed").exists(_ == "true")
-    if (skipSeed) {
-        log.info("Skipping provide-details concurrency data preparation (skipSeed=true)")
-    } else {
+    val jvmOptions = javaOptions.value
+
+    def sysProp(name: String): Option[String] =
+        sys.props.get(name).orElse {
+            jvmOptions.collectFirst {
+                case option if option.startsWith(s"-D$name=") =>
+                    option.stripPrefix(s"-D$name=")
+            }
+        }
 
     val runLocal =
-        sys.props.get("runLocal").forall(_ == "true")
+        sysProp("runLocal").forall(_ == "true")
 
     val backendUrl =
-        if (runLocal) "http://localhost:22202"
-        else "https://agent-registration.protected.mdtp"
+        if (runLocal) {
+            "http://localhost:22202"
+        } else {
+            sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
+        }
 
     val frontendUrl =
-        if (runLocal) "http://localhost:22201"
-        else "https://agent-registration-frontend.public.mdtp"
+        if (runLocal) {
+            "http://localhost:22201"
+        } else {
+            sys.env.getOrElse("FRONTEND_URL", "https://agent-registration-frontend.public.mdtp")
+        }
 
     val stubsUrl =
-        if (runLocal) "http://localhost:9099"
-        else "https://www.staging.tax.service.gov.uk"
+        if (runLocal) {
+            "http://localhost:9099"
+        } else {
+            sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk")
+        }
 
     val resetUrl =
-        if (runLocal) s"$frontendUrl/agent-registration/test-only/reset"
-        else "https://agent-registration-frontend.public.mdtp/agent-registration/test-only/reset"
+        sys.env.getOrElse("RESET_URL", s"$frontendUrl/agent-registration/test-only/reset")
 
     log.info(s"Preparing provide-details contention data. runLocal=$runLocal")
+    log.info(s"Using backend URL: $backendUrl")
+    log.info(s"Using frontend URL: $frontendUrl")
+    log.info(s"Using stubs URL: $stubsUrl")
 
     val env = Seq(
-        "BACKEND_URL" -> sys.env.getOrElse("BACKEND_URL", backendUrl),
-        "FRONTEND_URL" -> sys.env.getOrElse("FRONTEND_URL", frontendUrl),
-        "STUBS_URL" -> sys.env.getOrElse("STUBS_URL", stubsUrl),
-        "RESET_URL" -> sys.env.getOrElse("RESET_URL", resetUrl),
+        "BACKEND_URL" -> backendUrl,
+        "FRONTEND_URL" -> frontendUrl,
+        "STUBS_URL" -> stubsUrl,
+        "RESET_URL" -> resetUrl,
         "RESET_BEFORE_SEED" -> sys.env.getOrElse("RESET_BEFORE_SEED", "false"),
-
-        // The contention simulation uses atOnceUsers(6), so one seeded app is enough.
-        // Use 5 as a buffer in case the feeder is consumed unexpectedly or the test is rerun.
         "PROVIDE_DETAILS_APPS" -> sys.env.getOrElse("PROVIDE_DETAILS_APPS", "5")
     )
 
@@ -67,7 +80,6 @@ prepareProvideDetailsConcurrencyData := {
     }
 
     log.info("Provide-details contention data prepared")
-    } // end if (!skipSeed)
 }
 
 Gatling / test := (Gatling / test).dependsOn(prepareProvideDetailsConcurrencyData).value
