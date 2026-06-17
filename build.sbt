@@ -41,14 +41,14 @@ prepareProvideDetailsConcurrencyData := {
         if (runLocal) {
             "http://localhost:22201"
         } else {
-            sys.env.getOrElse("FRONTEND_URL", "https://agent-registration-frontend.public.mdtp")
+            sys.env.getOrElse("FRONTEND_URL", "https://www.staging.tax.service.gov.uk")
         }
 
     val stubsUrl =
         if (runLocal) {
             "http://localhost:9099"
         } else {
-            sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk")
+            sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk/agents-external-stubs")
         }
 
     val resetUrl =
