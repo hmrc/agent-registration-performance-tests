@@ -1827,7 +1827,7 @@ object AgentRegistrationRequests extends ServicesConfiguration with AgentRegistr
             debug(s"[DEBUG] Location from provide details CYA after email verification = [$fullLocation]")
             fullLocation
           }
-          .saveAs("individualSaUtrPageUrl")
+          .saveAs("unifiedCustomerRegistryIdentifiersUrlForConcurrency")
       )
 
   val getProvideDetailsCheckYourAnswersAfterEmailAddress: HttpRequestBuilder =
