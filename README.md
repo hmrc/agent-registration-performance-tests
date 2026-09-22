@@ -78,6 +78,8 @@ Use `-DdebugRequests=false` for normal local and Jenkins runs.
 
 This repository is a Scala/SBT Gatling suite using HMRC's `performance-test-runner`.
 
+Performance-test data seeding is also implemented in Scala. The SBT preparation tasks invoke the seeders directly, so Python and the third-party `requests` package are not required.
+
 Relevant files for the risk-outcome setup are:
 
 ```text
@@ -85,7 +87,7 @@ build.sbt
 src/test/scala/uk/gov/hmrc/perftests/mmtar/AgentRegistrationRiskOutcomeSimulation.scala
 src/test/scala/uk/gov/hmrc/perftests/mmtar/RiskOutcomeRequests.scala
 scripts/prepare_risk_outcome_data.sh
-scripts/seed_risk_outcomes.py
+src/test/scala/uk/gov/hmrc/perftests/mmtar/seeding/RiskOutcomeSeeder.scala
 src/test/resources/data/risk-outcomes/
 ```
 
@@ -166,7 +168,7 @@ Setup is performed first by:
 
 ```text
 scripts/prepare_risk_outcome_data.sh
-scripts/seed_risk_outcomes.py
+src/test/scala/uk/gov/hmrc/perftests/mmtar/seeding/RiskOutcomeSeeder.scala
 ```
 
 The default execution profile is:

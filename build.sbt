@@ -11,161 +11,182 @@ lazy val root = (project in file("."))
     Test / testOptions := Seq.empty,
     libraryDependencies ++= Dependencies.test
   )
+
 lazy val prepareProvideDetailsConcurrencyData =
-    taskKey[Unit]("Reset and seed provide-details concurrency data before Gatling")
+  taskKey[Unit]("Reset and seed provide-details concurrency data before Gatling")
 
 lazy val prepareRiskOutcomeData =
-    taskKey[Unit]("Seed deterministic risk-outcome data before Gatling")
+  taskKey[Unit]("Seed deterministic risk-outcome data before Gatling")
 
 lazy val preparePerformanceTestData =
-    taskKey[Unit]("Prepare all deterministic performance test data before Gatling")
+  taskKey[Unit]("Prepare all deterministic performance test data before Gatling")
+
+lazy val cleanupPerformanceTestData =
+  taskKey[Unit](
+    "Delete applications created by the performance-test seeders"
+  )
+
+lazy val refreshGeneratedTestResources =
+  taskKey[Unit]("Refresh generated feeder files on the Gatling test classpath")
+
+def systemProperty(name: String, jvmOptions: Seq[String]): Option[String] =
+  sys.props.get(name).orElse {
+    jvmOptions.collectFirst {
+      case option if option.startsWith(s"-D$name=") => option.stripPrefix(s"-D$name=")
+    }
+  }
+
+def resetIfRequested(frontendUrl: String, baseDir: File, log: sbt.util.Logger): Unit = {
+  if (sys.env.getOrElse("RESET_BEFORE_SEED", "false").equalsIgnoreCase("true")) {
+    val resetUrl = sys.env.getOrElse("RESET_URL", s"$frontendUrl/agent-registration/test-only/reset")
+    val exitCode = scala.sys.process.Process(
+      "scripts/reset_agent_registration_data.sh",
+      baseDir,
+      "RESET_URL" -> resetUrl
+    ).!
+    if (exitCode != 0) sys.error(s"reset_agent_registration_data.sh failed with exit code $exitCode")
+    log.info("Agent-registration data reset complete")
+  }
+}
 
 prepareProvideDetailsConcurrencyData := {
-    val log = streams.value.log
+  val log = streams.value.log
+  val jvmOptions = javaOptions.value
+  val runLocal = systemProperty("runLocal", jvmOptions).forall(_ == "true")
 
-    val jvmOptions = javaOptions.value
+  val backendUrl =
+    if (runLocal) "http://localhost:22202"
+    else sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
 
-    def sysProp(name: String): Option[String] =
-        sys.props.get(name).orElse {
-            jvmOptions.collectFirst {
-                case option if option.startsWith(s"-D$name=") =>
-                    option.stripPrefix(s"-D$name=")
-            }
-        }
+  val frontendUrl =
+    if (runLocal) "http://localhost:22201"
+    else sys.env.getOrElse("FRONTEND_URL", "https://www.staging.tax.service.gov.uk")
 
-    val runLocal =
-        sysProp("runLocal").forall(_ == "true")
+  val stubsUrl =
+    if (runLocal) "http://localhost:9099"
+    else sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk/agents-external-stubs")
 
-    val backendUrl =
-        if (runLocal) {
-            "http://localhost:22202"
-        } else {
-            sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
-        }
+  resetIfRequested(frontendUrl, baseDirectory.value, log)
 
-    val frontendUrl =
-        if (runLocal) {
-            "http://localhost:22201"
-        } else {
-            sys.env.getOrElse("FRONTEND_URL", "https://www.staging.tax.service.gov.uk")
-        }
+  val args = Seq(
+    "--backend-url", backendUrl,
+    "--frontend-url", frontendUrl,
+    "--stubs-url", stubsUrl,
+    "--apps", sys.env.getOrElse("PROVIDE_DETAILS_APPS", "5"),
+    "--individuals", sys.env.getOrElse("INDIVIDUALS_PER_APP", "6"),
+    "--application-seed-mode", sys.env.getOrElse("APPLICATION_SEED_MODE", "frontend-fast-forward"),
+    "--fast-forward-section", sys.env.getOrElse("FAST_FORWARD_SECTION", "LlpPartnersAndOtherRelevantTaxAdvisers6"),
+    "--output", sys.env.getOrElse("OUTPUT", "src/test/resources/data/provide-details-concurrency.csv")
+  )
 
-    val stubsUrl =
-        if (runLocal) {
-            "http://localhost:9099"
-        } else {
-            sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk/agents-external-stubs")
-        }
-
-    val resetUrl =
-        sys.env.getOrElse("RESET_URL", s"$frontendUrl/agent-registration/test-only/reset")
-
-    log.info(s"Preparing provide-details contention data. runLocal=$runLocal")
-    log.info(s"Using backend URL: $backendUrl")
-    log.info(s"Using frontend URL: $frontendUrl")
-    log.info(s"Using stubs URL: $stubsUrl")
-
-    val env = Seq(
-        "BACKEND_URL" -> backendUrl,
-        "FRONTEND_URL" -> frontendUrl,
-        "STUBS_URL" -> stubsUrl,
-        "RESET_URL" -> resetUrl,
-        "RESET_BEFORE_SEED" -> sys.env.getOrElse("RESET_BEFORE_SEED", "false"),
-        "PROVIDE_DETAILS_APPS" -> sys.env.getOrElse("PROVIDE_DETAILS_APPS", "5")
+  log.info(s"Preparing provide-details contention data in Scala. runLocal=$runLocal")
+  (Test / runner).value
+    .run(
+      "uk.gov.hmrc.perftests.mmtar.seeding.ProvideDetailsSeeder",
+      (Test / fullClasspath).value.files,
+      args,
+      log
     )
-
-    val exitCode =
-        scala.sys.process.Process(
-            "scripts/prepare_provide_details_concurrency_data.sh",
-            baseDirectory.value,
-            env: _*
-        ).!
-
-    if (exitCode != 0) {
-        sys.error(s"prepare_provide_details_concurrency_data.sh failed with exit code $exitCode")
-    }
-
-    log.info("Provide-details contention data prepared")
+    .get
 }
 
 prepareRiskOutcomeData := {
-    val log = streams.value.log
+  val log = streams.value.log
+  val jvmOptions = javaOptions.value
+  val runLocal = systemProperty("runLocal", jvmOptions).forall(_ == "true")
 
-    val jvmOptions = javaOptions.value
+  val backendUrl =
+    if (runLocal) "http://localhost:22202"
+    else sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
 
-    def sysProp(name: String): Option[String] =
-        sys.props.get(name).orElse {
-            jvmOptions.collectFirst {
-                case option if option.startsWith(s"-D$name=") =>
-                    option.stripPrefix(s"-D$name=")
-            }
-        }
+  val frontendUrl =
+    if (runLocal) "http://localhost:22201"
+    else sys.env.getOrElse("FRONTEND_URL", "https://www.staging.tax.service.gov.uk")
 
-    val runLocal =
-        sysProp("runLocal").forall(_ == "true")
+  val stubsUrl =
+    if (runLocal) "http://localhost:9099"
+    else sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk")
 
-    val backendUrl =
-        if (runLocal) {
-            "http://localhost:22202"
-        } else {
-            sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
-        }
+  resetIfRequested(frontendUrl, baseDirectory.value, log)
 
-    val frontendUrl =
-        if (runLocal) {
-            "http://localhost:22201"
-        } else {
-            sys.env.getOrElse("FRONTEND_URL", "https://www.staging.tax.service.gov.uk")
-        }
+  val optionalArgs = Seq(
+    "load-main-records" -> sys.env.get("RISK_OUTCOME_LOAD_MAIN_RECORDS"),
+    "load-control-records" -> sys.env.get("RISK_OUTCOME_LOAD_CONTROL_RECORDS"),
+    "load-scale-records" -> sys.env.get("RISK_OUTCOME_LOAD_SCALE_RECORDS")
+  ).flatMap { case (name, value) => value.filter(_.nonEmpty).toSeq.flatMap(v => Seq(s"--$name", v)) }
 
-    val stubsUrl =
-        if (runLocal) {
-            "http://localhost:9099"
-        } else {
-            sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk")
-        }
+  val args = Seq(
+    "--backend-url", backendUrl,
+    "--frontend-url", frontendUrl,
+    "--stubs-url", stubsUrl,
+    "--output-dir", sys.env.getOrElse("RISK_OUTCOME_OUTPUT_DIR", "src/test/resources/data/risk-outcomes"),
+    "--pools", sys.env.getOrElse("RISK_OUTCOME_POOLS", systemProperty("riskOutcome.pool", jvmOptions).getOrElse("load")),
+    "--total-peak-jps", sys.env.getOrElse("RISK_OUTCOME_TOTAL_PEAK_JPS", systemProperty("riskOutcome.totalPeakJps", jvmOptions).getOrElse("0.1")),
+    "--rampup-minutes", sys.env.getOrElse("RISK_OUTCOME_RAMPUP_MINUTES", systemProperty("riskOutcome.rampUpMinutes", jvmOptions).getOrElse("1")),
+    "--steady-minutes", sys.env.getOrElse("RISK_OUTCOME_STEADY_MINUTES", systemProperty("riskOutcome.steadyMinutes", jvmOptions).getOrElse("8")),
+    "--rampdown-minutes", sys.env.getOrElse("RISK_OUTCOME_RAMPDOWN_MINUTES", systemProperty("riskOutcome.rampDownMinutes", jvmOptions).getOrElse("1")),
+    "--buffer-percent", sys.env.getOrElse("RISK_OUTCOME_BUFFER_PERCENT", "20"),
+    "--smoke-records", sys.env.getOrElse("RISK_OUTCOME_SMOKE_RECORDS", systemProperty("riskOutcome.smokeRecords", jvmOptions).getOrElse("1"))
+  ) ++ optionalArgs ++ (if (sys.env.getOrElse("RISK_OUTCOME_DRY_RUN", "false").equalsIgnoreCase("true")) Seq("--dry-run") else Seq.empty)
 
-    log.info(s"Preparing risk-outcome performance data. runLocal=$runLocal")
-    log.info(s"Using backend URL: $backendUrl")
-    log.info(s"Using frontend URL: $frontendUrl")
-    log.info(s"Using stubs URL: $stubsUrl")
-
-    val env = Seq(
-        "BACKEND_URL" -> backendUrl,
-        "FRONTEND_URL" -> frontendUrl,
-        "STUBS_URL" -> stubsUrl,
-        "RESET_URL" -> sys.env.getOrElse("RESET_URL", s"$frontendUrl/agent-registration/test-only/reset"),
-        "RESET_BEFORE_SEED" -> sys.env.getOrElse("RESET_BEFORE_SEED", "false"),
-        "RISK_OUTCOME_POOLS" -> sys.env.getOrElse("RISK_OUTCOME_POOLS", "load"),
-        "RISK_OUTCOME_OUTPUT_DIR" -> sys.env.getOrElse("RISK_OUTCOME_OUTPUT_DIR", "src/test/resources/data/risk-outcomes"),
-        "RISK_OUTCOME_TOTAL_PEAK_JPS" -> sys.env.getOrElse("RISK_OUTCOME_TOTAL_PEAK_JPS", sysProp("riskOutcome.totalPeakJps").getOrElse("0.1")),
-        "RISK_OUTCOME_RAMPUP_MINUTES" -> sys.env.getOrElse("RISK_OUTCOME_RAMPUP_MINUTES", sysProp("riskOutcome.rampUpMinutes").getOrElse("1")),
-        "RISK_OUTCOME_STEADY_MINUTES" -> sys.env.getOrElse("RISK_OUTCOME_STEADY_MINUTES", sysProp("riskOutcome.steadyMinutes").getOrElse("8")),
-        "RISK_OUTCOME_RAMPDOWN_MINUTES" -> sys.env.getOrElse("RISK_OUTCOME_RAMPDOWN_MINUTES", sysProp("riskOutcome.rampDownMinutes").getOrElse("1")),
-        "RISK_OUTCOME_BUFFER_PERCENT" -> sys.env.getOrElse("RISK_OUTCOME_BUFFER_PERCENT", "20"),
-        "RISK_OUTCOME_LOAD_MAIN_RECORDS" -> sys.env.getOrElse("RISK_OUTCOME_LOAD_MAIN_RECORDS", ""),
-        "RISK_OUTCOME_LOAD_CONTROL_RECORDS" -> sys.env.getOrElse("RISK_OUTCOME_LOAD_CONTROL_RECORDS", ""),
-        "RISK_OUTCOME_LOAD_SCALE_RECORDS" -> sys.env.getOrElse("RISK_OUTCOME_LOAD_SCALE_RECORDS", ""),
-        "RISK_OUTCOME_SMOKE_RECORDS" -> sys.env.getOrElse("RISK_OUTCOME_SMOKE_RECORDS", "1")
+  log.info(s"Preparing risk-outcome performance data in Scala. runLocal=$runLocal")
+  (Test / runner).value
+    .run(
+      "uk.gov.hmrc.perftests.mmtar.seeding.RiskOutcomeSeeder",
+      (Test / fullClasspath).value.files,
+      args,
+      log
     )
+    .get
+}
 
-    val exitCode =
-        scala.sys.process.Process(
-            "scripts/prepare_risk_outcome_data.sh",
-            baseDirectory.value,
-            env.filterNot(_._2.isEmpty): _*
-        ).!
+refreshGeneratedTestResources := {
+  val log = streams.value.log
+  val sourceData = (Test / resourceDirectory).value / "data"
+  val targetData = (Test / classDirectory).value / "data"
 
-    if (exitCode != 0) {
-        sys.error(s"prepare_risk_outcome_data.sh failed with exit code $exitCode")
-    }
+  IO.copyDirectory(
+    sourceData,
+    targetData,
+    overwrite = true,
+    preserveLastModified = true
+  )
 
-    log.info("Risk-outcome performance data prepared")
+  log.info(s"Refreshed generated Gatling feeder resources from $sourceData to $targetData")
 }
 
 preparePerformanceTestData := Def.sequential(
-    prepareProvideDetailsConcurrencyData,
-    prepareRiskOutcomeData
+  prepareProvideDetailsConcurrencyData,
+  prepareRiskOutcomeData,
+  refreshGeneratedTestResources
 ).value
+
+cleanupPerformanceTestData := {
+  val log = streams.value.log
+  val jvmOptions = javaOptions.value
+  val runLocal = systemProperty("runLocal", jvmOptions).forall(_ == "true")
+
+  val backendUrl =
+    if (runLocal) "http://localhost:22202"
+    else sys.env.getOrElse(
+      "BACKEND_URL",
+      "https://agent-registration.protected.mdtp"
+    )
+
+  val args = Seq(
+    "--backend-url", backendUrl
+  )
+
+  log.info(s"Cleaning performance-test data in Scala. runLocal=$runLocal")
+
+  (Test / runner).value
+    .run(
+      "uk.gov.hmrc.perftests.mmtar.seeding.PerformanceTestDataCleanup",
+      (Test / fullClasspath).value.files,
+      args,
+      log
+    )
+    .get
+}
 
 Gatling / test := (Gatling / test).dependsOn(preparePerformanceTestData).value
