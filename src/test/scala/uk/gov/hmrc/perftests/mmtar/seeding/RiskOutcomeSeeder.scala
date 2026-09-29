@@ -190,12 +190,15 @@ object RiskOutcomeSeeder {
       seeder.runRisking()
       seeder.waitForRiskingInputs(seeds.toSeq)
 
-      println("  Uploading deterministic outcome files...")
-      seeds.foreach(seeder.uploadOutcomes)
+      println("  Uploading and processing deterministic outcome files...")
+      seeds.foreach { seed =>
+        seeder.uploadOutcomes(seed)
 
-      println("  Running risking results processing...")
-      seeder.runResultsProcessing()
-      seeder.waitForExpectedOutcomes(seeds.toSeq)
+        println(s"  Processing risk results for ${seed.applicationReference}...")
+        seeder.runResultsProcessing()
+
+        seeder.waitForExpectedOutcomes(Seq(seed))
+      }
 
       println("  Building feeder rows...")
       seeds.foreach { seed =>
