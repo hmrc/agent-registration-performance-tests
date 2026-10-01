@@ -95,17 +95,36 @@ prepareRiskOutcomeData := {
   val jvmOptions = javaOptions.value
   val runLocal = systemProperty("runLocal", jvmOptions).forall(_ == "true")
 
+  val runSmokeTest =
+    systemProperty("perftest.runSmokeTest", jvmOptions)
+      .exists(_.equalsIgnoreCase("true"))
+
+  val riskOutcomePool =
+    sys.env
+      .get("RISK_OUTCOME_POOLS")
+      .orElse(systemProperty("riskOutcome.pool", jvmOptions))
+      .getOrElse(if (runSmokeTest) "smoke" else "load")
+
   val backendUrl =
     if (runLocal) "http://localhost:22202"
-    else sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
+    else sys.env.getOrElse(
+      "BACKEND_URL",
+      "https://agent-registration.protected.mdtp"
+    )
 
   val frontendUrl =
     if (runLocal) "http://localhost:22201"
-    else sys.env.getOrElse("FRONTEND_URL", "https://www.staging.tax.service.gov.uk")
+    else sys.env.getOrElse(
+      "FRONTEND_URL",
+      "https://www.staging.tax.service.gov.uk"
+    )
 
   val stubsUrl =
     if (runLocal) "http://localhost:9099"
-    else sys.env.getOrElse("STUBS_URL", "https://www.staging.tax.service.gov.uk")
+    else sys.env.getOrElse(
+      "STUBS_URL",
+      "https://www.staging.tax.service.gov.uk"
+    )
 
   resetIfRequested(frontendUrl, baseDirectory.value, log)
 
@@ -113,23 +132,58 @@ prepareRiskOutcomeData := {
     "load-main-records" -> sys.env.get("RISK_OUTCOME_LOAD_MAIN_RECORDS"),
     "load-control-records" -> sys.env.get("RISK_OUTCOME_LOAD_CONTROL_RECORDS"),
     "load-scale-records" -> sys.env.get("RISK_OUTCOME_LOAD_SCALE_RECORDS")
-  ).flatMap { case (name, value) => value.filter(_.nonEmpty).toSeq.flatMap(v => Seq(s"--$name", v)) }
+  ).flatMap {
+    case (name, value) =>
+      value.filter(_.nonEmpty).toSeq.flatMap(v => Seq(s"--$name", v))
+  }
 
   val args = Seq(
     "--backend-url", backendUrl,
     "--frontend-url", frontendUrl,
     "--stubs-url", stubsUrl,
-    "--output-dir", sys.env.getOrElse("RISK_OUTCOME_OUTPUT_DIR", "src/test/resources/data/risk-outcomes"),
-    "--pools", sys.env.getOrElse("RISK_OUTCOME_POOLS", systemProperty("riskOutcome.pool", jvmOptions).getOrElse("load")),
-    "--total-peak-jps", sys.env.getOrElse("RISK_OUTCOME_TOTAL_PEAK_JPS", systemProperty("riskOutcome.totalPeakJps", jvmOptions).getOrElse("0.1")),
-    "--rampup-minutes", sys.env.getOrElse("RISK_OUTCOME_RAMPUP_MINUTES", systemProperty("riskOutcome.rampUpMinutes", jvmOptions).getOrElse("1")),
-    "--steady-minutes", sys.env.getOrElse("RISK_OUTCOME_STEADY_MINUTES", systemProperty("riskOutcome.steadyMinutes", jvmOptions).getOrElse("8")),
-    "--rampdown-minutes", sys.env.getOrElse("RISK_OUTCOME_RAMPDOWN_MINUTES", systemProperty("riskOutcome.rampDownMinutes", jvmOptions).getOrElse("1")),
-    "--buffer-percent", sys.env.getOrElse("RISK_OUTCOME_BUFFER_PERCENT", "20"),
-    "--smoke-records", sys.env.getOrElse("RISK_OUTCOME_SMOKE_RECORDS", systemProperty("riskOutcome.smokeRecords", jvmOptions).getOrElse("1"))
-  ) ++ optionalArgs ++ (if (sys.env.getOrElse("RISK_OUTCOME_DRY_RUN", "false").equalsIgnoreCase("true")) Seq("--dry-run") else Seq.empty)
+    "--output-dir", sys.env.getOrElse(
+      "RISK_OUTCOME_OUTPUT_DIR",
+      "src/test/resources/data/risk-outcomes"
+    ),
+    "--pool", riskOutcomePool,
+    "--total-peak-jps", sys.env.getOrElse(
+      "RISK_OUTCOME_TOTAL_PEAK_JPS",
+      systemProperty("riskOutcome.totalPeakJps", jvmOptions).getOrElse("0.1")
+    ),
+    "--rampup-minutes", sys.env.getOrElse(
+      "RISK_OUTCOME_RAMPUP_MINUTES",
+      systemProperty("riskOutcome.rampUpMinutes", jvmOptions).getOrElse("1")
+    ),
+    "--steady-minutes", sys.env.getOrElse(
+      "RISK_OUTCOME_STEADY_MINUTES",
+      systemProperty("riskOutcome.steadyMinutes", jvmOptions).getOrElse("8")
+    ),
+    "--rampdown-minutes", sys.env.getOrElse(
+      "RISK_OUTCOME_RAMPDOWN_MINUTES",
+      systemProperty("riskOutcome.rampDownMinutes", jvmOptions).getOrElse("1")
+    ),
+    "--buffer-percent", sys.env.getOrElse(
+      "RISK_OUTCOME_BUFFER_PERCENT",
+      "20"
+    ),
+    "--smoke-records", sys.env.getOrElse(
+      "RISK_OUTCOME_SMOKE_RECORDS",
+      systemProperty("riskOutcome.smokeRecords", jvmOptions).getOrElse("1")
+    )
+  ) ++ optionalArgs ++
+    (if (
+      sys.env
+        .getOrElse("RISK_OUTCOME_DRY_RUN", "false")
+        .equalsIgnoreCase("true")
+    )
+      Seq("--dry-run")
+    else Seq.empty)
 
-  log.info(s"Preparing risk-outcome performance data in Scala. runLocal=$runLocal")
+  log.info(
+    s"Preparing risk-outcome performance data in Scala. " +
+      s"runLocal=$runLocal, runSmokeTest=$runSmokeTest, pool=$riskOutcomePool"
+  )
+
   (Test / runner).value
     .run(
       "uk.gov.hmrc.perftests.mmtar.seeding.RiskOutcomeSeeder",
@@ -165,6 +219,16 @@ cleanupPerformanceTestData := {
   val log = streams.value.log
   val jvmOptions = javaOptions.value
   val runLocal = systemProperty("runLocal", jvmOptions).forall(_ == "true")
+
+  val runSmokeTest =
+    systemProperty("perftest.runSmokeTest", jvmOptions)
+      .exists(_.equalsIgnoreCase("true"))
+
+  val riskOutcomePool =
+    sys.env
+      .get("RISK_OUTCOME_POOLS")
+      .orElse(systemProperty("riskOutcome.pool", jvmOptions))
+      .getOrElse(if (runSmokeTest) "smoke" else "load")
 
   val backendUrl =
     if (runLocal) "http://localhost:22202"
