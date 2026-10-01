@@ -32,50 +32,50 @@ object RiskOutcomeSeeder {
   private val FastForwardIdPattern: Regex = "/agent-registration/test-only/show-agent-application-tile/([^/?#]+)".r
 
   final case class ScenarioDefinition(
-    scenarioId: String,
-    kind: String,
-    businessType: String,
-    completedSectionSlug: String,
-    linkedIndividuals: Int,
-    profile: String,
-    expectedOutcome: String,
-    entityFailures: Seq[String] = Seq.empty,
-    individualFailuresByIndex: Map[Int, Seq[String]] = Map.empty,
-    requiresInitialSubmission: Boolean = false,
-    postSeedAction: String = "none",
-    weight: Int = 1
-  )
+                                       scenarioId: String,
+                                       kind: String,
+                                       businessType: String,
+                                       completedSectionSlug: String,
+                                       linkedIndividuals: Int,
+                                       profile: String,
+                                       expectedOutcome: String,
+                                       entityFailures: Seq[String] = Seq.empty,
+                                       individualFailuresByIndex: Map[Int, Seq[String]] = Map.empty,
+                                       requiresInitialSubmission: Boolean = false,
+                                       postSeedAction: String = "none",
+                                       weight: Int = 1
+                                     )
 
   final case class Config(
-    backendUrl: String,
-    frontendUrl: String,
-    stubsUrl: String,
-    outputDir: String,
-    pools: Seq[String],
-    totalPeakJps: Double,
-    rampupMinutes: Int,
-    steadyMinutes: Int,
-    rampdownMinutes: Int,
-    bufferPercent: Int,
-    loadMainRecords: Option[Int],
-    loadControlRecords: Option[Int],
-    loadScaleRecords: Option[Int],
-    smokeRecords: Int,
-    cleanupManifest: String,
-    dryRun: Boolean
-  )
+                           backendUrl: String,
+                           frontendUrl: String,
+                           stubsUrl: String,
+                           outputDir: String,
+                           pool: String,
+                           totalPeakJps: Double,
+                           rampupMinutes: Int,
+                           steadyMinutes: Int,
+                           rampdownMinutes: Int,
+                           bufferPercent: Int,
+                           loadMainRecords: Option[Int],
+                           loadControlRecords: Option[Int],
+                           loadScaleRecords: Option[Int],
+                           smokeRecords: Int,
+                           cleanupManifest: String,
+                           dryRun: Boolean
+                         )
 
   final case class ApplicationSeed(
-    scenario: ScenarioDefinition,
-    pool: String,
-    recordIndex: Int,
-    appId: String,
-    applicationReference: String,
-    linkId: String,
-    applicantUserId: String,
-    applicantPlanetId: String,
-    individuals: Seq[Obj]
-  )
+                                    scenario: ScenarioDefinition,
+                                    pool: String,
+                                    recordIndex: Int,
+                                    appId: String,
+                                    applicationReference: String,
+                                    linkId: String,
+                                    applicantUserId: String,
+                                    applicantPlanetId: String,
+                                    individuals: Seq[Obj]
+                                  )
 
   private val scenarios: Seq[ScenarioDefinition] = Seq(
     ScenarioDefinition("APP-ST-FIX-RESUB", "applicant", "sole-trader", "sole-trader-declaration", 1, "main", "failed-fixable-resubmission", individualFailuresByIndex = Map(0 -> Seq("Check_4_1", "Check_10_1")), weight = 8),
@@ -113,16 +113,19 @@ object RiskOutcomeSeeder {
 
   def main(args: Array[String]): Unit = {
     val parsed = parseArgs(args)
-    val pools = option(parsed, "pools", "load").split(',').map(_.trim).filter(_.nonEmpty).toSeq
-    require(pools.nonEmpty, "At least one pool must be supplied")
-    pools.foreach(pool => require(Set("smoke", "load").contains(pool), s"Unsupported pool: $pool"))
+    val pool = option(parsed, "pool", "load")
+
+    require(
+      Set("smoke", "load").contains(pool),
+      s"Unsupported pool: $pool"
+    )
 
     val config = Config(
       backendUrl = option(parsed, "backend-url", "http://localhost:22202").stripSuffix("/"),
       frontendUrl = option(parsed, "frontend-url", "http://localhost:22201").stripSuffix("/"),
       stubsUrl = option(parsed, "stubs-url", "http://localhost:9099").stripSuffix("/"),
       outputDir = option(parsed, "output-dir", "src/test/resources/data/risk-outcomes"),
-      pools = pools,
+      pool = pool,
       totalPeakJps = doubleOption(parsed, "total-peak-jps", 0.1),
       rampupMinutes = intOption(parsed, "rampup-minutes", 1),
       steadyMinutes = intOption(parsed, "steady-minutes", 8),
@@ -146,13 +149,14 @@ object RiskOutcomeSeeder {
     println(s"  Stubs        : ${config.stubsUrl}")
     println(s"  Output dir   : ${config.outputDir}")
     println(s"  Cleanup      : ${config.cleanupManifest}")
-    println(s"  Pools        : ${config.pools.mkString(", ")}")
+    println(s"  Pool         : ${config.pool}")
     println(s"  Peak JPS     : ${config.totalPeakJps}")
     println(s"  Profile      : ${config.rampupMinutes}m ramp-up, ${config.steadyMinutes}m steady, ${config.rampdownMinutes}m ramp-down")
     println(s"  Buffer       : ${config.bufferPercent}%")
+
     scenarios.foreach { scenario =>
-      val counts = config.pools.map(pool => s"$pool=${recordsForPool(scenario, pool, config)}").mkString(", ")
-      println(f"  ${scenario.scenarioId}%-28s $counts")
+      val count = recordsForPool(scenario, config.pool, config)
+      println(f"  ${scenario.scenarioId}%-28s ${config.pool}=$count")
     }
 
     if (config.dryRun) {
@@ -161,152 +165,216 @@ object RiskOutcomeSeeder {
     }
 
     val seeder = new Seeder(config)
-    requireSuccess(seeder.http.get(s"${config.backendUrl}/agent-registration/test-only/recent-applications"), "Backend readiness check")
-    val manifest = Obj()
 
-    config.pools.foreach { pool =>
-      println(s"\n=== Generating pool: $pool ===")
-      val poolDir = Paths.get(config.outputDir, pool)
-      Files.createDirectories(poolDir)
+    requireSuccess(
+      seeder.http.get(
+        s"${config.backendUrl}/agent-registration/test-only/recent-applications"
+      ),
+      "Backend readiness check"
+    )
 
-      val applicantRowsByScenario = mutable.Map.empty[String, mutable.ArrayBuffer[Map[String, String]]].withDefaultValue(mutable.ArrayBuffer.empty)
-      val individualRowsByScenario = mutable.Map.empty[String, mutable.ArrayBuffer[Map[String, String]]].withDefaultValue(mutable.ArrayBuffer.empty)
-      val applicantAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
-      val individualAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
-      val controlsAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
-      val twoPersonAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
-      val sixPersonAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
-      val seeds = mutable.ArrayBuffer.empty[ApplicationSeed]
+    println(s"\n=== Generating pool: ${config.pool} ===")
 
-      scenarios.foreach { scenario =>
-        val count = recordsForPool(scenario, pool, config)
-        (1 to count).foreach { index =>
-          println(s"  [$pool] ${scenario.scenarioId} $index/$count")
-          seeds += seeder.createApplicationSeed(scenario, pool, index)
-        }
+    val outputDir = Paths.get(config.outputDir)
+    Files.createDirectories(outputDir)
+
+    val applicantRowsByScenario =
+      mutable.Map.empty[String, mutable.ArrayBuffer[Map[String, String]]]
+        .withDefaultValue(mutable.ArrayBuffer.empty)
+
+    val individualRowsByScenario =
+      mutable.Map.empty[String, mutable.ArrayBuffer[Map[String, String]]]
+        .withDefaultValue(mutable.ArrayBuffer.empty)
+
+    val applicantAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
+    val individualAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
+    val controlsAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
+    val twoPersonAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
+    val sixPersonAggregate = mutable.ArrayBuffer.empty[Map[String, String]]
+    val seeds = mutable.ArrayBuffer.empty[ApplicationSeed]
+
+    scenarios.foreach { scenario =>
+      val count = recordsForPool(scenario, config.pool, config)
+
+      (1 to count).foreach { index =>
+        println(s"  [${config.pool}] ${scenario.scenarioId} $index/$count")
+        seeds += seeder.createApplicationSeed(
+          scenario,
+          config.pool,
+          index
+        )
       }
-
-      println("\n  Running risking for all newly created records...")
-      seeder.runRisking()
-      seeder.waitForRiskingInputs(seeds.toSeq)
-
-      println("  Uploading and processing deterministic outcome files...")
-      seeds.foreach { seed =>
-        seeder.uploadOutcomes(seed)
-
-        println(s"  Processing risk results for ${seed.applicationReference}...")
-        seeder.runResultsProcessing()
-
-        seeder.waitForExpectedOutcomes(Seq(seed))
-      }
-
-      println("  Building feeder rows...")
-      seeds.foreach { seed =>
-        val scenario = seed.scenario
-        if (scenario.kind == "applicant") {
-          val routes = applicantRoutes(seeder.frontend, seed.linkId)
-          var row = Map(
-            "scenario_id" -> scenario.scenarioId,
-            "business_type" -> scenario.businessType,
-            "application_reference" -> seed.applicationReference,
-            "applicant_login_url" -> seeder.applicantLoginUrl(seed.appId, routes("task_list_url")),
-            "applicant_start_url" -> (if (scenario.postSeedAction == "applicant_resubmit") routes("status_url") else routes("task_list_url")),
-            "expected_outcome" -> scenario.expectedOutcome,
-            "task_list_url" -> routes("task_list_url"),
-            "status_url" -> routes("status_url"),
-            "declaration_url" -> routes("declaration_url"),
-            "entity_failure_url" -> (if (scenario.entityFailures.nonEmpty) routes("entity_failure_url") else ""),
-            "entity_failure_code" -> (if (scenario.entityFailures.nonEmpty) "EntityFix.4.1" else ""),
-            "individual_failure_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_failure_url") else ""),
-            "individual_failure_code" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") "IndividualFix.4.1" else ""),
-            "individual_identity_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_identity_url") else ""),
-            "individual_dob_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_dob_url") else ""),
-            "individual_nino_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_nino_url") else ""),
-            "individual_sautr_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_sautr_url") else ""),
-            "individual_check_your_answers_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_check_your_answers_url") else ""),
-            "amls_failure_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_failure_url") else ""),
-            "amls_failure_code" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") "EntityFix.3.1" else ""),
-            "amls_supervisor_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_supervisor_url") else ""),
-            "amls_registration_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_registration_url") else ""),
-            "amls_evidence_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_evidence_url") else ""),
-            "amls_check_your_answers_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_check_your_answers_url") else ""),
-            "parent_individual_count" -> scenario.linkedIndividuals.toString
-          )
-          if (scenario.postSeedAction == "applicant_resubmit") {
-            seeder.completeApplicantResubmission(row)
-            row = row.updated("applicant_login_url", seeder.applicantLoginUrl(seed.appId, routes("status_url"))).updated("applicant_start_url", routes("status_url"))
-          }
-          appendByScenario(applicantRowsByScenario, scenario.scenarioId, row)
-          applicantAggregate += row
-          addVariants(scenario, row, controlsAggregate, twoPersonAggregate, sixPersonAggregate)
-        } else {
-          val targetFailures = scenario.individualFailuresByIndex.getOrElse(0, Seq.empty)
-          val individual = seed.individuals.head
-          val individualId = field(individual, "_id")
-          val personReference = field(individual, "personReference")
-          val individualName = field(individual, "individualName")
-          val failureCode = "IndividualFix.4.1"
-          val routes = individualRoutes(seeder.frontend, seed.linkId, failureCode)
-          val startUrl = if (scenario.scenarioId == "IND-FIX-ALREADY-CONFIRMED") routes("task_list_url") else routes("start_url")
-          var row = Map(
-            "scenario_id" -> scenario.scenarioId,
-            "business_type" -> scenario.businessType,
-            "application_reference" -> seed.applicationReference,
-            "person_reference" -> personReference,
-            "link_id" -> seed.linkId,
-            "individual_name" -> individualName,
-            "individual_login_url" -> seeder.individualLoginUrl(seed.appId, individualId, individualName, startUrl),
-            "individual_start_url" -> startUrl,
-            "expected_outcome" -> scenario.expectedOutcome,
-            "task_list_url" -> routes("task_list_url"),
-            "failure_details_url" -> (if (targetFailures.nonEmpty) routes("failure_details_url") else ""),
-            "failure_code" -> (if (targetFailures.nonEmpty) failureCode else ""),
-            "identity_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("identity_url") else ""),
-            "dob_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("dob_url") else ""),
-            "nino_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("nino_url") else ""),
-            "sautr_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("sautr_url") else ""),
-            "check_your_answers_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("check_your_answers_url") else ""),
-            "declaration_url" -> routes("declaration_url"),
-            "confirmation_url" -> routes("confirmation_url"),
-            "parent_individual_count" -> scenario.linkedIndividuals.toString
-          )
-          if (scenario.postSeedAction == "individual_complete") {
-            seeder.completeIndividualFixableJourney(row)
-            row = row.updated("individual_login_url", seeder.individualLoginUrl(seed.appId, individualId, individualName, routes("task_list_url"))).updated("individual_start_url", routes("task_list_url"))
-          }
-          appendByScenario(individualRowsByScenario, scenario.scenarioId, row)
-          individualAggregate += row
-          addVariants(scenario, row, controlsAggregate, twoPersonAggregate, sixPersonAggregate)
-        }
-      }
-
-      scenarios.foreach { scenario =>
-        val rows = if (scenario.kind == "applicant") applicantRowsByScenario.getOrElse(scenario.scenarioId, mutable.ArrayBuffer.empty) else individualRowsByScenario.getOrElse(scenario.scenarioId, mutable.ArrayBuffer.empty)
-        val headers = if (scenario.kind == "applicant") applicantHeaders else individualHeaders
-        writeCsv(poolDir.resolve(s"${scenario.scenarioId}.csv").toString, headers, rows.toSeq)
-      }
-      writeCsv(poolDir.resolve("applicant-scenarios.csv").toString, applicantHeaders, applicantAggregate.toSeq)
-      writeCsv(poolDir.resolve("individual-scenarios.csv").toString, individualHeaders, individualAggregate.toSeq)
-      writeCsv(poolDir.resolve("control-scenarios.csv").toString, supersetHeaders(controlsAggregate.toSeq), controlsAggregate.toSeq)
-      writeCsv(poolDir.resolve("two-person-variants.csv").toString, supersetHeaders(twoPersonAggregate.toSeq), twoPersonAggregate.toSeq)
-      writeCsv(poolDir.resolve("six-person-variants.csv").toString, supersetHeaders(sixPersonAggregate.toSeq), sixPersonAggregate.toSeq)
-
-      val files = Files.list(poolDir)
-      val fileNames = try files.iterator().asScala.map(_.getFileName.toString).toSeq.sorted finally files.close()
-      val poolManifest = Obj(
-        "scenarioCounts" -> Obj.from(scenarios.map(s => s.scenarioId -> ujson.Num(recordsForPool(s, pool, config)))),
-        "applicantRecords" -> applicantAggregate.size,
-        "individualRecords" -> individualAggregate.size,
-        "controlRecords" -> controlsAggregate.size,
-        "twoPersonRecords" -> twoPersonAggregate.size,
-        "sixPersonRecords" -> sixPersonAggregate.size,
-        "files" -> Arr.from(fileNames.map(ujson.Str(_)))
-      )
-      manifest(pool) = poolManifest
-      writeJson(poolDir.resolve("manifest.json").toString, poolManifest)
     }
 
-    writeJson(Paths.get(config.outputDir, "manifest.json").toString, manifest)
+    println("\n  Running risking for all newly created records...")
+    seeder.runRisking()
+    seeder.waitForRiskingInputs(seeds.toSeq)
+
+    val resultsProcessingBatchSize = 5
+
+    println(
+      s"  Uploading and processing deterministic outcome files in batches of $resultsProcessingBatchSize..."
+    )
+
+    seeds.grouped(resultsProcessingBatchSize).foreach { batch =>
+      println(s"  Uploading outcomes for ${batch.size} applications...")
+      batch.foreach(seeder.uploadOutcomes)
+
+      println(
+        s"  Processing risk results for batch of ${batch.size} applications..."
+      )
+      seeder.runResultsProcessing()
+      seeder.waitForExpectedOutcomes(batch.toSeq)
+    }
+
+    println("  Building feeder rows...")
+
+    seeds.foreach { seed =>
+      val scenario = seed.scenario
+
+      if (scenario.kind == "applicant") {
+        val routes = applicantRoutes(seeder.frontend, seed.linkId)
+
+        var row = Map(
+          "scenario_id" -> scenario.scenarioId,
+          "business_type" -> scenario.businessType,
+          "application_reference" -> seed.applicationReference,
+          "applicant_login_url" -> seeder.applicantLoginUrl(seed.appId, routes("task_list_url")),
+          "applicant_start_url" -> (if (scenario.postSeedAction == "applicant_resubmit") routes("status_url") else routes("task_list_url")),
+          "expected_outcome" -> scenario.expectedOutcome,
+          "task_list_url" -> routes("task_list_url"),
+          "status_url" -> routes("status_url"),
+          "declaration_url" -> routes("declaration_url"),
+          "entity_failure_url" -> (if (scenario.entityFailures.nonEmpty) routes("entity_failure_url") else ""),
+          "entity_failure_code" -> (if (scenario.entityFailures.nonEmpty) "EntityFix.4.1" else ""),
+          "individual_failure_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_failure_url") else ""),
+          "individual_failure_code" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") "IndividualFix.4.1" else ""),
+          "individual_identity_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_identity_url") else ""),
+          "individual_dob_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_dob_url") else ""),
+          "individual_nino_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_nino_url") else ""),
+          "individual_sautr_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_sautr_url") else ""),
+          "individual_check_your_answers_url" -> (if (scenario.scenarioId == "APP-ST-FIX-RESUB") routes("individual_check_your_answers_url") else ""),
+          "amls_failure_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_failure_url") else ""),
+          "amls_failure_code" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") "EntityFix.3.1" else ""),
+          "amls_supervisor_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_supervisor_url") else ""),
+          "amls_registration_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_registration_url") else ""),
+          "amls_evidence_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_evidence_url") else ""),
+          "amls_check_your_answers_url" -> (if (scenario.scenarioId == "APP-AMLS-FIX-RESUB") routes("amls_check_your_answers_url") else ""),
+          "parent_individual_count" -> scenario.linkedIndividuals.toString
+        )
+
+        if (scenario.postSeedAction == "applicant_resubmit") {
+          seeder.completeApplicantResubmission(row)
+          row = row
+            .updated("applicant_login_url", seeder.applicantLoginUrl(seed.appId, routes("status_url")))
+            .updated("applicant_start_url", routes("status_url"))
+        }
+
+        appendByScenario(applicantRowsByScenario, scenario.scenarioId, row)
+        applicantAggregate += row
+        addVariants(scenario, row, controlsAggregate, twoPersonAggregate, sixPersonAggregate)
+
+      } else {
+        val targetFailures = scenario.individualFailuresByIndex.getOrElse(0, Seq.empty)
+        val individual = seed.individuals.head
+        val individualId = field(individual, "_id")
+        val personReference = field(individual, "personReference")
+        val individualName = field(individual, "individualName")
+        val failureCode = "IndividualFix.4.1"
+        val routes = individualRoutes(seeder.frontend, seed.linkId, failureCode)
+        val startUrl =
+          if (scenario.scenarioId == "IND-FIX-ALREADY-CONFIRMED") routes("task_list_url")
+          else routes("start_url")
+
+        var row = Map(
+          "scenario_id" -> scenario.scenarioId,
+          "business_type" -> scenario.businessType,
+          "application_reference" -> seed.applicationReference,
+          "person_reference" -> personReference,
+          "link_id" -> seed.linkId,
+          "individual_name" -> individualName,
+          "individual_login_url" -> seeder.individualLoginUrl(seed.appId, individualId, individualName, startUrl),
+          "individual_start_url" -> startUrl,
+          "expected_outcome" -> scenario.expectedOutcome,
+          "task_list_url" -> routes("task_list_url"),
+          "failure_details_url" -> (if (targetFailures.nonEmpty) routes("failure_details_url") else ""),
+          "failure_code" -> (if (targetFailures.nonEmpty) failureCode else ""),
+          "identity_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("identity_url") else ""),
+          "dob_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("dob_url") else ""),
+          "nino_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("nino_url") else ""),
+          "sautr_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("sautr_url") else ""),
+          "check_your_answers_url" -> (if (targetFailures.exists(_.startsWith("Check_10"))) routes("check_your_answers_url") else ""),
+          "declaration_url" -> routes("declaration_url"),
+          "confirmation_url" -> routes("confirmation_url"),
+          "parent_individual_count" -> scenario.linkedIndividuals.toString
+        )
+
+        if (scenario.postSeedAction == "individual_complete") {
+          seeder.completeIndividualFixableJourney(row)
+          row = row
+            .updated(
+              "individual_login_url",
+              seeder.individualLoginUrl(seed.appId, individualId, individualName, routes("task_list_url"))
+            )
+            .updated("individual_start_url", routes("task_list_url"))
+        }
+
+        appendByScenario(individualRowsByScenario, scenario.scenarioId, row)
+        individualAggregate += row
+        addVariants(scenario, row, controlsAggregate, twoPersonAggregate, sixPersonAggregate)
+      }
+    }
+
+    scenarios.foreach { scenario =>
+      val rows =
+        if (scenario.kind == "applicant")
+          applicantRowsByScenario.getOrElse(scenario.scenarioId, mutable.ArrayBuffer.empty)
+        else
+          individualRowsByScenario.getOrElse(scenario.scenarioId, mutable.ArrayBuffer.empty)
+
+      val headers =
+        if (scenario.kind == "applicant") applicantHeaders
+        else individualHeaders
+
+      writeCsv(
+        outputDir.resolve(s"${scenario.scenarioId}.csv").toString,
+        headers,
+        rows.toSeq
+      )
+    }
+
+    writeCsv(outputDir.resolve("applicant-scenarios.csv").toString, applicantHeaders, applicantAggregate.toSeq)
+    writeCsv(outputDir.resolve("individual-scenarios.csv").toString, individualHeaders, individualAggregate.toSeq)
+    writeCsv(outputDir.resolve("control-scenarios.csv").toString, supersetHeaders(controlsAggregate.toSeq), controlsAggregate.toSeq)
+    writeCsv(outputDir.resolve("two-person-variants.csv").toString, supersetHeaders(twoPersonAggregate.toSeq), twoPersonAggregate.toSeq)
+    writeCsv(outputDir.resolve("six-person-variants.csv").toString, supersetHeaders(sixPersonAggregate.toSeq), sixPersonAggregate.toSeq)
+
+    val files = Files.list(outputDir)
+    val fileNames =
+      try files.iterator().asScala.map(_.getFileName.toString).toSeq.sorted
+      finally files.close()
+
+    val manifest = Obj(
+      "pool" -> config.pool,
+      "scenarioCounts" -> Obj.from(
+        scenarios.map { scenario =>
+          scenario.scenarioId ->
+            ujson.Num(recordsForPool(scenario, config.pool, config))
+        }
+      ),
+      "applicantRecords" -> applicantAggregate.size,
+      "individualRecords" -> individualAggregate.size,
+      "controlRecords" -> controlsAggregate.size,
+      "twoPersonRecords" -> twoPersonAggregate.size,
+      "sixPersonRecords" -> sixPersonAggregate.size,
+      "files" -> Arr.from(fileNames.map(ujson.Str(_)))
+    )
+
+    writeJson(
+      outputDir.resolve("manifest.json").toString,
+      manifest
+    )
+
     println("\nDone. Generated deterministic risk-outcome feeder data.")
   }
 
@@ -314,12 +382,12 @@ object RiskOutcomeSeeder {
     map.getOrElseUpdate(key, mutable.ArrayBuffer.empty) += row
 
   private def addVariants(
-    scenario: ScenarioDefinition,
-    row: Map[String, String],
-    controls: mutable.ArrayBuffer[Map[String, String]],
-    twoPerson: mutable.ArrayBuffer[Map[String, String]],
-    sixPerson: mutable.ArrayBuffer[Map[String, String]]
-  ): Unit = {
+                           scenario: ScenarioDefinition,
+                           row: Map[String, String],
+                           controls: mutable.ArrayBuffer[Map[String, String]],
+                           twoPerson: mutable.ArrayBuffer[Map[String, String]],
+                           sixPerson: mutable.ArrayBuffer[Map[String, String]]
+                         ): Unit = {
     if (scenario.profile == "control") controls += row
     if (scenario.linkedIndividuals == 2) twoPerson += row
     if (scenario.linkedIndividuals == 6) sixPerson += row
@@ -729,3 +797,4 @@ object RiskOutcomeSeeder {
     }
   }
 }
+

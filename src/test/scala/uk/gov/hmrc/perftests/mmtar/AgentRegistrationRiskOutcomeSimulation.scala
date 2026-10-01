@@ -34,16 +34,12 @@ class AgentRegistrationRiskOutcomeSimulation extends Simulation {
 
   private val config = ConfigFactory.load()
 
-  private def stringSetting(propertyName: String, configPath: String): String =
-    sys.props.get(propertyName).filter(_.nonEmpty).getOrElse(config.getString(configPath))
-
   private def doubleSetting(propertyName: String, configPath: String): Double =
     sys.props.get(propertyName).flatMap(value => scala.util.Try(value.toDouble).toOption).getOrElse(config.getDouble(configPath))
 
   private def intSetting(propertyName: String, configPath: String): Int =
     sys.props.get(propertyName).flatMap(value => scala.util.Try(value.toInt).toOption).getOrElse(config.getInt(configPath))
 
-  private val feederPool        = stringSetting("riskOutcome.pool", "riskOutcome.pool")
   private val totalPeakJps      = doubleSetting("riskOutcome.totalPeakJps", "riskOutcome.totalPeakJps")
   private val rampUpMinutes     = intSetting("riskOutcome.rampUpMinutes", "riskOutcome.rampUpMinutes")
   private val steadyMinutes     = intSetting("riskOutcome.steadyMinutes", "riskOutcome.steadyMinutes")
@@ -53,7 +49,7 @@ class AgentRegistrationRiskOutcomeSimulation extends Simulation {
   private val httpProtocol = http.disableFollowRedirect
 
   private def feederFor(scenarioId: String) =
-    csv(s"data/risk-outcomes/$feederPool/$scenarioId.csv").queue
+    csv(s"data/risk-outcomes/$scenarioId.csv").queue
 
   private def weightFor(scenarioId: String, defaultWeight: Double): Double =
     sys.props
@@ -69,6 +65,11 @@ class AgentRegistrationRiskOutcomeSimulation extends Simulation {
       if (expected == actual) session
       else session.markAsFailed.set("riskOutcomeStartUrlMismatch", s"expected=$expected actual=$actual")
     }
+
+  private val runSmokeTest =
+    sys.props
+      .get("perftest.runSmokeTest")
+      .exists(_.equalsIgnoreCase("true"))
 
   private val applicantEntityResubmissionChain: ChainBuilder =
     exitBlockOnFail(
@@ -243,16 +244,24 @@ class AgentRegistrationRiskOutcomeSimulation extends Simulation {
     totalPeakJps * weight / totalWeight
 
   private val injections = enabledScenarios.map { case (definition, effectiveWeight) =>
-    val scenarioPeakRate = peakRate(effectiveWeight)
+    val scenarioBuilder =
+      scenario(definition.id)
+        .feed(feederFor(definition.id))
+        .exec(definition.chain)
 
-    scenario(definition.id)
-      .feed(feederFor(definition.id))
-      .exec(definition.chain)
-      .inject(
+    if (runSmokeTest) {
+      scenarioBuilder.inject(
+        atOnceUsers(1)
+      )
+    } else {
+      val scenarioPeakRate = peakRate(effectiveWeight)
+
+      scenarioBuilder.inject(
         rampUsersPerSec(0.0).to(scenarioPeakRate).during(rampUpMinutes.minutes),
         constantUsersPerSec(scenarioPeakRate).during(steadyMinutes.minutes),
         rampUsersPerSec(scenarioPeakRate).to(0.0).during(rampDownMinutes.minutes)
       )
+    }
   }
 
   setUp(injections: _*)

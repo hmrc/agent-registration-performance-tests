@@ -28,5 +28,4 @@ project/project
 project/target
 
 # test files
-src/test/resources/data/risk-outcomes/load/
-src/test/resources/data/risk-outcomes/smoke/
+src/test/resources/data/risk-outcomes/
