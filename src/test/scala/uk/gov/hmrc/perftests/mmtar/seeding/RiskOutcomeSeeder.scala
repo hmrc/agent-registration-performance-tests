@@ -210,22 +210,57 @@ object RiskOutcomeSeeder {
     seeder.runRisking()
     seeder.waitForRiskingInputs(seeds.toSeq)
 
-    val resultsProcessingBatchSize = 5
+    val maxBatchWeight = 6
 
-    println(
-      s"  Uploading and processing deterministic outcome files in batches of $resultsProcessingBatchSize..."
-    )
+    def seedWeight(seed: ApplicationSeed): Int =
+      math.max(1, seed.scenario.linkedIndividuals)
 
-    seeds.grouped(resultsProcessingBatchSize).foreach { batch =>
-      println(s"  Uploading outcomes for ${batch.size} applications...")
+    def weightedBatches(
+                         seeds: Seq[ApplicationSeed],
+                         maxWeight: Int
+                       ): Seq[Seq[ApplicationSeed]] = {
+
+      seeds.foldLeft(Vector(Vector.empty[ApplicationSeed])) { (batches, seed) =>
+        val currentBatch = batches.last
+        val currentWeight = currentBatch.map(seedWeight).sum
+        val weight = seedWeight(seed)
+
+        if (currentBatch.nonEmpty && currentWeight + weight > maxWeight) {
+          batches :+ Vector(seed)
+        } else {
+          batches.init :+ (currentBatch :+ seed)
+        }
+      }.filter(_.nonEmpty)
+    }
+
+    def processBatch(batch: Seq[ApplicationSeed]): Unit = {
+      val batchWeight = batch.map(seedWeight).sum
+
+      println(
+        s"  Uploading outcomes for ${batch.size} applications " +
+          s"(weight=$batchWeight): " +
+          batch.map(_.scenario.scenarioId).mkString(", ")
+      )
+
       batch.foreach(seeder.uploadOutcomes)
 
       println(
-        s"  Processing risk results for batch of ${batch.size} applications..."
+        s"  Processing risk results for batch of ${batch.size} applications " +
+          s"(weight=$batchWeight)..."
       )
+
       seeder.runResultsProcessing()
-      seeder.waitForExpectedOutcomes(batch.toSeq)
+      seeder.waitForExpectedOutcomes(batch)
     }
+
+    val batches =
+      weightedBatches(seeds.toSeq, maxBatchWeight)
+
+    println(
+      s"  Uploading and processing deterministic outcomes in ${batches.size} weighted batches..."
+    )
+
+    batches.foreach(processBatch)
 
     println("  Building feeder rows...")
 
