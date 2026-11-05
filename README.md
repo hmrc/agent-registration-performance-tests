@@ -218,6 +218,14 @@ RISKING_RESULTS_DRY_RUN=true       # print the plan only, no API calls
 
 Seeded applications are recorded in `tmp/performance-test-cleanup/risking-results-file.json` and removed by `cleanupPerformanceTestData`.
 
+Both `cleanupPerformanceTestData` and the simulation's automatic post-run cleanup also call
+`DELETE /agent-registration-risking/test-only/processed-results-files` to clear processed results files from object store.
+This deletes **all processed results files** in the target environment, not just files associated with the cleanup manifests,
+and runs even when no seeded application manifests remain. Manifests are removed only after both cleanup steps succeed.
+The risking service defaults to `http://localhost:22203` locally or `https://agent-registration-risking.protected.mdtp`
+when `runLocal=false`; set `RISKING_URL` to override the non-local URL.
+Set `RISKING_RESULTS_SKIP_CLEANUP=true` to skip both automatic cleanup steps and retain data for investigation.
+
 Prepare the data only:
 
 ```bash

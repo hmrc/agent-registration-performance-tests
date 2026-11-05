@@ -34,22 +34,25 @@ class AgentRegistrationRiskingResultsFileProcessingSimulation extends Simulation
       .exec(RiskingResultsFileRequests.runResultsFileProcessing)
       .exec(RiskingResultsFileRequests.getUnprocessedAvailableFilesExpectingNone)
 
-  // Remove the applications created by data prep once the run finishes (pass or fail).
-  // Set RISKING_RESULTS_SKIP_CLEANUP=true to keep them, e.g. for investigation.
+  // Remove seeded applications and processed results files once the run finishes (pass or fail).
+  // Set RISKING_RESULTS_SKIP_CLEANUP=true to keep both, e.g. for investigation.
   after {
     val skip = sys.env.get("RISKING_RESULTS_SKIP_CLEANUP").exists(_.equalsIgnoreCase("true"))
-    if (skip) println("Skipping cleanup of risking results file applications (RISKING_RESULTS_SKIP_CLEANUP=true)")
+    if (skip) println("Skipping cleanup of risking results file applications and processed files (RISKING_RESULTS_SKIP_CLEANUP=true)")
     else {
       val runLocal = sys.props.get("runLocal").forall(_ == "true")
       val backendUrl =
         if (runLocal) "http://localhost:22202"
         else sys.env.getOrElse("BACKEND_URL", "https://agent-registration.protected.mdtp")
+      val riskingUrl =
+        if (runLocal) "http://localhost:22203"
+        else sys.env.getOrElse("RISKING_URL", "https://agent-registration-risking.protected.mdtp")
       try
         PerformanceTestDataCleanup.main(
-          Array("--backend-url", backendUrl, "--only-risking-results-file", "true")
+          Array("--backend-url", backendUrl, "--risking-url", riskingUrl, "--only-risking-results-file", "true")
         )
       catch {
-        case e: Exception => println(s"Cleanup of risking results file applications failed: ${e.getMessage}")
+        case e: Exception => println(s"Cleanup of risking results file applications and processed files failed: ${e.getMessage}")
       }
     }
   }

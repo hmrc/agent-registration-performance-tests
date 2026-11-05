@@ -26,7 +26,7 @@ lazy val preparePerformanceTestData =
 
 lazy val cleanupPerformanceTestData =
   taskKey[Unit](
-    "Delete applications created by the performance-test seeders"
+    "Delete applications created by the performance-test seeders and processed risking results files"
   )
 
 lazy val refreshGeneratedTestResources =
@@ -298,8 +298,16 @@ cleanupPerformanceTestData := {
       "https://agent-registration.protected.mdtp"
     )
 
+  val riskingUrl =
+    if (runLocal) "http://localhost:22203"
+    else sys.env.getOrElse(
+      "RISKING_URL",
+      "https://agent-registration-risking.protected.mdtp"
+    )
+
   val args = Seq(
-    "--backend-url", backendUrl
+    "--backend-url", backendUrl,
+    "--risking-url", riskingUrl
   )
 
   log.info(s"Cleaning performance-test data in Scala. runLocal=$runLocal")
