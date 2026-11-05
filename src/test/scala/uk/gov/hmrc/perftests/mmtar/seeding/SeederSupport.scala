@@ -111,6 +111,15 @@ final class SeederHttpClient(
         .build()
     )
 
+  def delete(
+              url: String
+            ): SeederResponse =
+    send(
+      request(url)
+        .DELETE()
+        .build()
+    )
+
   def postJson(
                 url: String,
                 json: Value

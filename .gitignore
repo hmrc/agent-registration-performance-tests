@@ -28,4 +28,5 @@ project/project
 project/target
 
 # test files
+src/test/resources/data/provide-details-concurrency.csv
 src/test/resources/data/risk-outcomes/

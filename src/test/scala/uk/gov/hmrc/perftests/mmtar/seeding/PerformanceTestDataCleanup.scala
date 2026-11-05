@@ -24,6 +24,7 @@ object PerformanceTestDataCleanup {
 
   final case class Config(
                            backendUrl: String = "http://localhost:22202",
+                           riskingUrl: String = "http://localhost:22203",
                            provideDetailsManifest: String =
                            "tmp/performance-test-cleanup/provide-details.json",
                            riskOutcomesManifest: String =
@@ -41,6 +42,12 @@ object PerformanceTestDataCleanup {
           parsed,
           "backend-url",
           "http://localhost:22202"
+        ).stripSuffix("/"),
+      riskingUrl =
+        option(
+          parsed,
+          "risking-url",
+          "http://localhost:22203"
         ).stripSuffix("/"),
       provideDetailsManifest =
         option(
@@ -91,39 +98,52 @@ object PerformanceTestDataCleanup {
     println(s"  Results-file applications    : ${riskingResultsFileIds.size}")
     println(s"  Total unique applications    : ${applicationIds.size}")
 
-    if (applicationIds.isEmpty) {
-      println("\nNo seeded applications found. Nothing to clean up.\n")
-      return
-    }
-
     val http =
       new SeederHttpClient(
         30,
         persistCookies = false
       )
 
-    val payload =
-      Obj(
-        "agentApplicationIds" ->
-          Arr.from(
-            applicationIds.map(
-              ujson.Str(_)
+    if (applicationIds.nonEmpty) {
+      val payload =
+        Obj(
+          "agentApplicationIds" ->
+            Arr.from(
+              applicationIds.map(
+                ujson.Str(_)
+              )
             )
-          )
-      )
+        )
 
-    val response =
+      val response =
+        requireSuccess(
+          http.postJson(
+            s"${config.backendUrl}/agent-registration/test-only/applications/cleanup",
+            payload
+          ),
+          "Cleanup seeded performance-test applications"
+        )
+
+      if (response.status != 204) {
+        throw new RuntimeException(
+          s"Cleanup expected HTTP 204 but got ${response.status}"
+        )
+      }
+    } else {
+      println("\nNo seeded applications found. Cleaning processed results files only.")
+    }
+
+    val processedFilesResponse =
       requireSuccess(
-        http.postJson(
-          s"${config.backendUrl}/agent-registration/test-only/applications/cleanup",
-          payload
+        http.delete(
+          s"${config.riskingUrl}/agent-registration-risking/test-only/processed-results-files"
         ),
-        "Cleanup seeded performance-test applications"
+        "Cleanup processed risking results files"
       )
 
-    if (response.status != 204) {
+    if (processedFilesResponse.status != 204) {
       throw new RuntimeException(
-        s"Cleanup expected HTTP 204 but got ${response.status}"
+        s"Processed results files cleanup expected HTTP 204 but got ${processedFilesResponse.status}"
       )
     }
 
@@ -140,6 +160,7 @@ object PerformanceTestDataCleanup {
       s"\n✓ Deleted ${applicationIds.size} seeded applications and their individuals"
     )
 
+    println("✓ Processed risking results files deleted from object store")
     println("✓ Cleanup manifests removed\n")
   }
 
